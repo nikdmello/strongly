@@ -1,9 +1,3 @@
-
-
-
-
-
-
 import Foundation
 
 enum Difficulty: String, Codable {

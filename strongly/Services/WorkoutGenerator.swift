@@ -1,9 +1,3 @@
-
-
-
-
-
-
 import Foundation
 
 enum EquipmentType: String, CaseIterable {

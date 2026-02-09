@@ -1,8 +1,3 @@
-
-
-
-
-
 import Foundation
 
 enum MuscleGroup: String, CaseIterable, Codable {

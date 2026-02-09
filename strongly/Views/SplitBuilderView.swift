@@ -1,8 +1,3 @@
-
-
-
-
-
 import SwiftUI
 
 struct SplitBuilderView: View {

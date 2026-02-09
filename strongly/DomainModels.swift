@@ -1,11 +1,4 @@
-
-
-
-
-
 import Foundation
-
-
 
 struct WorkoutSession: Identifiable, Codable {
     let id: UUID

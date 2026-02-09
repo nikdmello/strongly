@@ -1,9 +1,3 @@
-
-
-
-
-
-
 import SwiftUI
 
 struct ExercisePickerView: View {
