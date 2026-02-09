@@ -5,7 +5,7 @@ struct SplitBuilderView: View {
     @ObservedObject private var unitStore = UnitSettingsStore.shared
     @State private var customizeTargets = false
     @State private var editingDay: SplitDayConfig?
-    
+
     var body: some View {
         NavigationView {
             ScrollView {
@@ -33,18 +33,18 @@ struct SplitBuilderView: View {
         }
         .preferredColorScheme(.dark)
     }
-    
+
     private var planControls: some View {
         VStack(alignment: .leading, spacing: Space.m) {
             Text("Plan")
                 .font(.system(size: 18, weight: .bold))
                 .foregroundColor(.white)
-            
+
             VStack(alignment: .leading, spacing: Space.s) {
                 Text("Training Days")
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundColor(.white.opacity(0.6))
-                
+
                 Picker("Training Days", selection: Binding(
                     get: { store.plan.trainingDays },
                     set: { newValue in
@@ -60,12 +60,12 @@ struct SplitBuilderView: View {
                 .background(Color.white.opacity(0.15))
                 .cornerRadius(8)
             }
-            
+
             VStack(alignment: .leading, spacing: Space.s) {
                 Text("Split Type")
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundColor(.white.opacity(0.6))
-                
+
                 Picker("Split Type", selection: Binding(
                     get: { store.plan.splitType },
                     set: { newValue in
@@ -79,12 +79,12 @@ struct SplitBuilderView: View {
                 .pickerStyle(.menu)
                 .tint(.white)
             }
-            
+
             VStack(alignment: .leading, spacing: Space.s) {
                 Text("Units")
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundColor(.white.opacity(0.6))
-                
+
                 Picker("Units", selection: $unitStore.unit) {
                     Text("lb").tag(WeightUnit.lb)
                     Text("kg").tag(WeightUnit.kg)
@@ -104,16 +104,16 @@ struct SplitBuilderView: View {
         )
         .shadow(color: .black.opacity(0.4), radius: 8, y: 2)
     }
-    
+
     private var targetSection: some View {
         VStack(alignment: .leading, spacing: Space.m) {
             HStack {
                 Text("Weekly Targets")
                     .font(.system(size: 18, weight: .bold))
                     .foregroundColor(.white)
-                
+
                 Spacer()
-                
+
                 Button(customizeTargets ? "Done" : "Customize") {
                     withAnimation(Motion.quick) {
                         customizeTargets.toggle()
@@ -121,7 +121,7 @@ struct SplitBuilderView: View {
                 }
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundColor(.white.opacity(0.7))
-                
+
                 if customizeTargets {
                     Button("Reset") {
                         store.resetTargets()
@@ -130,11 +130,11 @@ struct SplitBuilderView: View {
                     .foregroundColor(.white.opacity(0.7))
                 }
             }
-            
+
             Text("Default is \(Int(TrainingTargets.advancedWeeklySets)) sets per muscle per week.")
                 .font(.system(size: 13))
                 .foregroundColor(.white.opacity(0.6))
-            
+
             if customizeTargets {
                 VStack(spacing: Space.s) {
                     ForEach(MuscleGroup.allCases, id: \.self) { muscle in
@@ -142,9 +142,9 @@ struct SplitBuilderView: View {
                             Text(muscle.displayName)
                                 .font(.system(size: 14, weight: .semibold))
                                 .foregroundColor(.white)
-                            
+
                             Spacer()
-                            
+
                             Stepper(
                                 value: Binding(
                                     get: { Int(store.plan.weeklyTargets[muscle] ?? TrainingTargets.advancedWeeklySets) },
@@ -171,13 +171,13 @@ struct SplitBuilderView: View {
         )
         .shadow(color: .black.opacity(0.4), radius: 8, y: 2)
     }
-    
+
     private var scheduleSection: some View {
         VStack(alignment: .leading, spacing: Space.m) {
             Text("Weekly Schedule")
                 .font(.system(size: 18, weight: .bold))
                 .foregroundColor(.white)
-            
+
             VStack(spacing: Space.s) {
                 ForEach(store.plan.days) { day in
                     Button {
@@ -190,14 +190,14 @@ struct SplitBuilderView: View {
                                 Text(weekDayLabel(for: day.dayIndex))
                                     .font(.system(size: 14, weight: .semibold))
                                     .foregroundColor(.white)
-                                
+
                                 Text(day.dayType.rawValue)
                                     .font(.system(size: 13))
                                     .foregroundColor(.white.opacity(0.6))
                             }
-                            
+
                             Spacer()
-                            
+
                             if day.isRest {
                                 Text("Rest")
                                     .font(.system(size: 13, weight: .semibold))
@@ -229,16 +229,16 @@ struct SplitBuilderView: View {
         )
         .shadow(color: .black.opacity(0.4), radius: 8, y: 2)
     }
-    
+
     private var todayTargetsSection: some View {
         VStack(alignment: .leading, spacing: Space.m) {
             Text("Today’s Targets")
                 .font(.system(size: 18, weight: .bold))
                 .foregroundColor(.white)
-            
+
             let dayIndex = store.currentTrainingDayIndex()
             let todayTargets = VolumeEngine.targetsForDay(plan: store.plan, dayIndex: dayIndex)
-            
+
             if todayTargets.isEmpty {
                 Text("Rest day. Focus on recovery.")
                     .font(.system(size: 14))
@@ -250,9 +250,9 @@ struct SplitBuilderView: View {
                             Text(muscle.displayName)
                                 .font(.system(size: 14, weight: .semibold))
                                 .foregroundColor(.white)
-                            
+
                             Spacer()
-                            
+
                             Text("\(formatSets(todayTargets[muscle] ?? 0)) sets")
                                 .font(.system(size: 13, weight: .semibold))
                                 .foregroundColor(.white.opacity(0.6))
@@ -270,13 +270,13 @@ struct SplitBuilderView: View {
         )
         .shadow(color: .black.opacity(0.4), radius: 8, y: 2)
     }
-    
+
     private func weekDayLabel(for index: Int) -> String {
         let symbols = Calendar.current.weekdaySymbols
         let mondayFirstIndex = (index + 1) % 7
         return symbols[mondayFirstIndex]
     }
-    
+
     private func formatSets(_ value: Double) -> String {
         if value.truncatingRemainder(dividingBy: 1) == 0 {
             return "\(Int(value))"
@@ -288,14 +288,14 @@ struct SplitBuilderView: View {
 struct DayTargetEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var workingDay: SplitDayConfig
-    
+
     let onSave: (SplitDayConfig) -> Void
-    
+
     init(day: SplitDayConfig, onSave: @escaping (SplitDayConfig) -> Void) {
         self._workingDay = State(initialValue: day)
         self.onSave = onSave
     }
-    
+
     var body: some View {
         NavigationView {
             List {
@@ -309,13 +309,13 @@ struct DayTargetEditorView: View {
                             workingDay.customMuscles = nil
                         }
                     }
-                
+
                 if workingDay.dayType != .rest {
                     Button("Use default muscles for this day type") {
                         workingDay.customMuscles = nil
                     }
                     .foregroundColor(.textSecondary)
-                    
+
                     Section("Target Muscles") {
                         ForEach(MuscleGroup.allCases, id: \.self) { muscle in
                             Toggle(muscle.displayName, isOn: Binding(

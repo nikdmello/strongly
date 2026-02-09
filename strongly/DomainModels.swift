@@ -7,7 +7,7 @@ struct WorkoutSession: Identifiable, Codable {
     var notes: String
     var duration: TimeInterval
     var caloriesBurned: Int
-    
+
     init(id: UUID = UUID(), date: Date = Date(), exercises: [ExerciseLog] = [], notes: String = "", duration: TimeInterval = 0, caloriesBurned: Int = 0) {
         self.id = id
         self.date = date
@@ -23,7 +23,7 @@ struct ExerciseLog: Identifiable, Codable {
     let name: String
     var sets: [ExerciseSet]
     var notes: String
-    
+
     init(id: UUID = UUID(), name: String, sets: [ExerciseSet] = [], notes: String = "") {
         self.id = id
         self.name = name
@@ -37,7 +37,7 @@ struct ExerciseSet: Identifiable, Codable {
     var weight: Double
     var reps: Int
     var completed: Bool
-    
+
     init(id: UUID = UUID(), weight: Double = 0, reps: Int = 0, completed: Bool = true) {
         self.id = id
         self.weight = weight
@@ -50,19 +50,17 @@ struct ExerciseHistory {
     let exerciseName: String
     let lastWorkout: Date
     let sets: [ExerciseSet]
-    
+
     var suggestedWeight: Double {
         guard let lastSet = sets.first else { return 0 }
         let allCompleted = sets.allSatisfy { $0.completed && $0.reps >= lastSet.reps }
         return allCompleted ? lastSet.weight + 5 : lastSet.weight
     }
-    
+
     var suggestedReps: Int {
         sets.first?.reps ?? 0
     }
 }
-
-
 
 struct SocialWorkout: Identifiable, Codable {
     let id: UUID
@@ -74,7 +72,7 @@ struct SocialWorkout: Identifiable, Codable {
     var downvotes: Int
     let submittedBy: String
     let dateAdded: Date
-    
+
     var score: Int { upvotes - downvotes }
 }
 
@@ -82,19 +80,15 @@ enum VoteType: String, Codable {
     case up, down, none
 }
 
-
-
-
-
 struct MomentumSession: Identifiable, Codable {
     let id: UUID
     let startDate: Date
     var endDate: Date?
-    let commitmentMinutes: Int 
+    let commitmentMinutes: Int
     var actualMinutes: Int
-    var extended: Bool 
+    var extended: Bool
     var completed: Bool
-    
+
     init(id: UUID = UUID(), startDate: Date = Date(), endDate: Date? = nil, commitmentMinutes: Int = 5, actualMinutes: Int = 0, extended: Bool = false, completed: Bool = false) {
         self.id = id
         self.startDate = startDate
@@ -104,11 +98,9 @@ struct MomentumSession: Identifiable, Codable {
         self.extended = extended
         self.completed = completed
     }
-    
+
     var duration: TimeInterval {
         guard let end = endDate else { return 0 }
         return end.timeIntervalSince(startDate)
     }
 }
-
-

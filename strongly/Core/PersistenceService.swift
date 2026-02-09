@@ -5,7 +5,7 @@ enum PersistenceError: LocalizedError {
     case decodingFailed
     case fileSystemError
     case corruptedData
-    
+
     var errorDescription: String? {
         switch self {
         case .encodingFailed: return "Failed to save data"
@@ -27,17 +27,17 @@ final class FileSystemPersistence: PersistenceService, @unchecked Sendable {
     private let fileManager = FileManager.default
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
-    
+
     nonisolated init() {}
-    
+
     private var documentsDirectory: URL {
         fileManager.urls(for: .documentDirectory, in: .userDomainMask)[0]
     }
-    
+
     @MainActor
     func save<T: Codable>(_ data: T, key: String) async throws {
         let url = documentsDirectory.appendingPathComponent("\(key).json")
-        
+
         do {
             let encoded = try encoder.encode(data)
             try encoded.write(to: url, options: .atomic)
@@ -45,15 +45,15 @@ final class FileSystemPersistence: PersistenceService, @unchecked Sendable {
             throw PersistenceError.encodingFailed
         }
     }
-    
+
     @MainActor
     func load<T: Codable>(key: String, as type: T.Type) async throws -> T? {
         let url = documentsDirectory.appendingPathComponent("\(key).json")
-        
+
         guard fileManager.fileExists(atPath: url.path) else {
             return nil
         }
-        
+
         do {
             let data = try Data(contentsOf: url)
             return try decoder.decode(T.self, from: data)
@@ -61,13 +61,13 @@ final class FileSystemPersistence: PersistenceService, @unchecked Sendable {
             throw PersistenceError.decodingFailed
         }
     }
-    
+
     @MainActor
     func delete(key: String) async throws {
         let url = documentsDirectory.appendingPathComponent("\(key).json")
-        
+
         guard fileManager.fileExists(atPath: url.path) else { return }
-        
+
         do {
             try fileManager.removeItem(at: url)
         } catch {

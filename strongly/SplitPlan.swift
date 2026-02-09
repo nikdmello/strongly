@@ -23,21 +23,21 @@ struct SplitDayConfig: Identifiable, Codable, Hashable {
     var dayIndex: Int
     var dayType: DayType
     var customMuscles: [MuscleGroup]?
-    
+
     init(id: UUID = UUID(), dayIndex: Int, dayType: DayType, customMuscles: [MuscleGroup]? = nil) {
         self.id = id
         self.dayIndex = dayIndex
         self.dayType = dayType
         self.customMuscles = customMuscles
     }
-    
+
     func resolvedMuscles() -> [MuscleGroup] {
         if let custom = customMuscles {
             return custom
         }
         return DayTypeMuscles.defaultMuscles(for: dayType)
     }
-    
+
     var isRest: Bool {
         dayType == .rest
     }
@@ -48,7 +48,7 @@ struct SplitPlan: Codable {
     var splitType: SplitType
     var weeklyTargets: [MuscleGroup: Double]
     var days: [SplitDayConfig]
-    
+
     static func defaultPlan() -> SplitPlan {
         let trainingDays = 5
         let splitType: SplitType = .hybrid
@@ -63,7 +63,7 @@ struct SplitPlan: Codable {
             days: days
         )
     }
-    
+
     static func defaultTargets() -> [MuscleGroup: Double] {
         var targets: [MuscleGroup: Double] = [:]
         for muscle in MuscleGroup.allCases {
@@ -140,15 +140,15 @@ struct VolumeEngine {
             let sessions = max(plan.trainingDays, 1)
             perSession[muscle] = weekly / Double(sessions)
         }
-        
+
         return perSession
     }
-    
+
     static func targetsForDay(plan: SplitPlan, dayIndex: Int) -> [MuscleGroup: Double] {
         guard dayIndex >= 0 && dayIndex < plan.days.count else { return [:] }
         let day = plan.days[dayIndex]
         guard !day.isRest else { return [:] }
-        
+
         let perSession = perSessionTargets(plan: plan)
         var targets: [MuscleGroup: Double] = [:]
         for muscle in day.resolvedMuscles() {
@@ -166,10 +166,10 @@ final class SplitPlanStore: ObservableObject {
     @Published var currentDayIndex: Int {
         didSet { saveCursor() }
     }
-    
+
     private let storageKey = "split_plan_v1"
     private let cursorKey = "split_plan_cursor_v1"
-    
+
     init() {
         let initialPlan: SplitPlan
         if let data = UserDefaults.standard.data(forKey: storageKey),
@@ -179,14 +179,14 @@ final class SplitPlanStore: ObservableObject {
             initialPlan = SplitPlan.defaultPlan()
         }
         self.plan = initialPlan
-        
+
         if let savedIndex = UserDefaults.standard.object(forKey: cursorKey) as? Int {
             self.currentDayIndex = savedIndex
         } else {
             self.currentDayIndex = Self.firstTrainingDayIndex(in: initialPlan)
         }
     }
-    
+
     func applyTemplate(trainingDays: Int, splitType: SplitType) {
         let template = SplitTemplates.template(for: splitType, trainingDays: trainingDays)
         plan.trainingDays = trainingDays
@@ -196,11 +196,11 @@ final class SplitPlanStore: ObservableObject {
         }
         currentDayIndex = Self.firstTrainingDayIndex(in: plan)
     }
-    
+
     func resetTargets() {
         plan.weeklyTargets = SplitPlan.defaultTargets()
     }
-    
+
     func currentTrainingDayIndex() -> Int {
         if plan.days.isEmpty {
             return 0
@@ -212,21 +212,21 @@ final class SplitPlanStore: ObservableObject {
         currentDayIndex = nextIndex
         return nextIndex
     }
-    
+
     func advanceAfterWorkout() {
         currentDayIndex = Self.nextTrainingDayIndex(from: currentDayIndex, in: plan)
     }
-    
+
     private func save() {
         if let data = try? JSONEncoder().encode(plan) {
             UserDefaults.standard.set(data, forKey: storageKey)
         }
     }
-    
+
     private func saveCursor() {
         UserDefaults.standard.set(currentDayIndex, forKey: cursorKey)
     }
-    
+
     private static func firstTrainingDayIndex(in plan: SplitPlan) -> Int {
         for (index, day) in plan.days.enumerated() {
             if !day.isRest {
@@ -235,7 +235,7 @@ final class SplitPlanStore: ObservableObject {
         }
         return 0
     }
-    
+
     private static func nextTrainingDayIndex(from index: Int, in plan: SplitPlan) -> Int {
         guard !plan.days.isEmpty else { return 0 }
         let count = plan.days.count

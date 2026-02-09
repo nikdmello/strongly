@@ -1,7 +1,7 @@
 import Foundation
 
 enum MuscleGroup: String, CaseIterable, Codable {
-    
+
     case chestUpper
     case chestLower
     case backWidth
@@ -9,18 +9,16 @@ enum MuscleGroup: String, CaseIterable, Codable {
     case shoulderFront
     case shoulderSide
     case shoulderRear
-    
-    
+
     case quads
     case hamstrings
     case glutes
     case calves
-    
-    
+
     case biceps
     case triceps
     case abs
-    
+
     var displayName: String {
         switch self {
         case .chestUpper: return "Chest (Upper)"
@@ -39,7 +37,7 @@ enum MuscleGroup: String, CaseIterable, Codable {
         case .abs: return "Abs"
         }
     }
-    
+
     var emoji: String {
         switch self {
         case .chestUpper, .chestLower: return "🫀"
@@ -64,8 +62,8 @@ enum TrainingTargets {
 struct MuscleVolume {
     let muscle: MuscleGroup
     var sets: Double
-    var totalVolume: Double 
-    
+    var totalVolume: Double
+
     func progress(targetSets: Double) -> Double {
         guard targetSets > 0 else { return 0 }
         return min((sets / targetSets) * 100, 100)
@@ -76,18 +74,17 @@ class MuscleTracker {
     static func calculateWeeklyVolume(sessions: [WorkoutSession]) -> [MuscleGroup: MuscleVolume] {
         let weekAgo = Calendar.current.date(byAdding: .day, value: -7, to: Date()) ?? Date()
         let recentSessions = sessions.filter { $0.date >= weekAgo }
-        
+
         var volumes: [MuscleGroup: MuscleVolume] = [:]
-        
+
         for session in recentSessions {
             for exercise in session.exercises {
                 guard let metadata = matchedExercise(for: exercise.name) else { continue }
-                
+
                 let completedSets = exercise.sets.filter { $0.completed }
                 let setCount = Double(completedSets.count)
                 let volume = completedSets.reduce(0.0) { $0 + ($1.weight * Double($1.reps)) }
-                
-                
+
                 for muscle in metadata.primaryMuscles {
                     if volumes[muscle] == nil {
                         volumes[muscle] = MuscleVolume(muscle: muscle, sets: 0, totalVolume: 0)
@@ -95,8 +92,7 @@ class MuscleTracker {
                     volumes[muscle]?.sets += setCount
                     volumes[muscle]?.totalVolume += volume
                 }
-                
-                
+
                 for muscle in metadata.secondaryMuscles {
                     if volumes[muscle] == nil {
                         volumes[muscle] = MuscleVolume(muscle: muscle, sets: 0, totalVolume: 0)
@@ -106,15 +102,15 @@ class MuscleTracker {
                 }
             }
         }
-        
+
         return volumes
     }
-    
+
     private static func matchedExercise(for name: String) -> Exercise? {
         if let exact = ExerciseDatabase.shared.getExercise(named: name) {
             return exact
         }
-        
+
         let normalized = name.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
         return ExerciseDatabase.shared.exercises.first { exercise in
             let candidate = exercise.name.lowercased()

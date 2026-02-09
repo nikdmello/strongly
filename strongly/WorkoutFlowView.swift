@@ -8,8 +8,7 @@ enum WorkoutConstants {
     static let maxWeight = 1000.0
     static let minReps = 0
     static let maxReps = 100
-    
-    
+
     static let secondsPerDay: TimeInterval = 86400
     static let fullRecoveryDays = 2.0
     static let adequateRecoveryDays = 1.0
@@ -21,7 +20,7 @@ struct WorkoutFlowView: View {
     let initialSession: WorkoutSession?
     let repository: WorkoutRepository
     let preloadedExercises: [ExerciseLog]
-    
+
     @StateObject private var sessionViewModel: WorkoutSessionViewModel
     @StateObject private var restTimer = RestTimerViewModel()
     @StateObject private var planStore = SplitPlanStore()
@@ -32,14 +31,14 @@ struct WorkoutFlowView: View {
     @State private var celebrationMessage = ""
     @State private var showCancelAlert = false
     @State private var isCompleted = false
-    
+
     init(initialSession: WorkoutSession?, repository: WorkoutRepository, preloadedExercises: [ExerciseLog] = []) {
         self.initialSession = initialSession
         self.repository = repository
         self.preloadedExercises = preloadedExercises
         self._sessionViewModel = StateObject(wrappedValue: WorkoutSessionViewModel(repository: repository))
     }
-    
+
     var body: some View {
         ZStack {
             if isCompleted {
@@ -50,16 +49,15 @@ struct WorkoutFlowView: View {
         }
         .background(Color.paper)
     }
-    
+
     private var workoutView: some View {
         VStack(spacing: 0) {
             header
             progressBar
             Divider()
-            
+
             workoutContent(sessionViewModel.currentSession ?? WorkoutSession(exercises: []))
-            
-            
+
             Button {
                 showExercisePicker = true
             } label: {
@@ -130,8 +128,8 @@ struct WorkoutFlowView: View {
             Text("Your progress will be lost.")
         }
         .alert("Error", isPresented: .constant(sessionViewModel.error != nil)) {
-            Button("OK") { 
-                sessionViewModel.error = nil 
+            Button("OK") {
+                sessionViewModel.error = nil
             }
         } message: {
             if let error = sessionViewModel.error {
@@ -144,7 +142,7 @@ struct WorkoutFlowView: View {
             Button("Cancel", role: .cancel) {}
         }
     }
-    
+
     private var header: some View {
         HStack {
             Button {
@@ -160,10 +158,9 @@ struct WorkoutFlowView: View {
                     .foregroundColor(.graphite)
             }
             .frame(width: 60, alignment: .leading)
-            
+
             Spacer()
-            
-            
+
             if restTimer.isActive {
                 HStack(spacing: 4) {
                     Button {
@@ -178,7 +175,7 @@ struct WorkoutFlowView: View {
                             .font(.body)
                             .foregroundColor(.graphite)
                     }
-                    
+
                     Button {
                         restTimer.stopTimer()
                     } label: {
@@ -187,7 +184,7 @@ struct WorkoutFlowView: View {
                             .foregroundColor(.primary)
                             .monospacedDigit()
                     }
-                    
+
                     Button {
                         restTimer.startTimer(duration: restTimer.remainingTime + 15)
                     } label: {
@@ -201,9 +198,9 @@ struct WorkoutFlowView: View {
                     .font(.body)
                     .foregroundColor(.graphite)
             }
-            
+
             Spacer()
-            
+
             Button {
                 Task {
                     await completeWorkoutWithSummary()
@@ -221,14 +218,14 @@ struct WorkoutFlowView: View {
         .padding(.vertical, Spacing.s)
         .background(Color.paper)
     }
-    
+
     private var progressBar: some View {
         GeometryReader { geometry in
             ZStack(alignment: .leading) {
                 Rectangle()
                     .fill(Color.ghost)
                     .frame(height: 2)
-                
+
                 Rectangle()
                     .fill(Color.primary)
                     .frame(width: geometry.size.width * progressWidth, height: 2)
@@ -237,12 +234,12 @@ struct WorkoutFlowView: View {
         }
         .frame(height: 2)
     }
-    
+
     private var progressWidth: CGFloat {
         guard let session = sessionViewModel.currentSession else { return 0 }
         return progress(session)
     }
-    
+
     private func workoutContent(_ session: WorkoutSession) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Spacing.l) {
@@ -265,31 +262,30 @@ struct WorkoutFlowView: View {
                             sessionViewModel.deleteSet(setId: setId)
                         },
                         onReplace: {
-                            
+
                         },
                         onDeleteExercise: {
                             sessionViewModel.deleteExercise(exerciseId: exercise.id)
                         }
                     )
                 }
-                
+
                 if session.exercises.isEmpty {
                     VStack(spacing: Spacing.m) {
                         Image(systemName: "figure.strengthtraining.traditional")
                             .font(.system(size: 64))
                             .foregroundColor(.ash)
-                        
+
                         VStack(spacing: Spacing.xs) {
                             Text("Ready to start?")
                                 .font(.title)
                                 .foregroundColor(.ink)
-                            
+
                             Text("Add your first exercise below")
                                 .font(.body)
                                 .foregroundColor(.graphite)
                         }
-                        
-                        
+
                         if let suggestion = smartSuggestion {
                             Text(suggestion)
                                 .font(.detail)
@@ -305,7 +301,7 @@ struct WorkoutFlowView: View {
         }
         .background(Color.paper)
     }
-    
+
     private var restTimerOverlay: some View {
         ZStack {
             Color.black.opacity(0.3)
@@ -313,21 +309,21 @@ struct WorkoutFlowView: View {
                 .onTapGesture {
                     restTimer.stopTimer()
                 }
-            
+
             VStack {
                 Spacer()
-                
+
                 VStack(spacing: Spacing.l) {
                     VStack(spacing: Spacing.s) {
                         Text("Rest Timer")
                             .font(.caption)
                             .foregroundColor(.textSecondary)
-                        
+
                         Text("\(restTimer.remainingTime)")
                             .font(.display)
                             .foregroundColor(.text)
                     }
-                    
+
                     HStack(spacing: Spacing.m) {
                         Button("Skip") {
                             restTimer.stopTimer()
@@ -338,7 +334,7 @@ struct WorkoutFlowView: View {
                         .frame(height: 48)
                         .background(Color.surface)
                         .cornerRadius(12)
-                        
+
                         Button("+30s") {
                             restTimer.remainingTime += 30
                         }
@@ -359,7 +355,7 @@ struct WorkoutFlowView: View {
             }
         }
     }
-    
+
     private var loadingState: some View {
         VStack(spacing: 16) {
             Spacer()
@@ -371,75 +367,73 @@ struct WorkoutFlowView: View {
             Spacer()
         }
     }
-    
+
     private var savingState: some View {
         VStack(spacing: 20) {
             Spacer()
-            
+
             ZStack {
                 Circle()
                     .stroke(Color.primary.opacity(0.2), lineWidth: 4)
                     .frame(width: 80, height: 80)
-                
+
                 Circle()
                     .trim(from: 0, to: 0.7)
                     .stroke(Color.primary, lineWidth: 4)
                     .frame(width: 80, height: 80)
                     .rotationEffect(.degrees(-90))
                     .animation(.linear(duration: 1).repeatForever(autoreverses: false), value: UUID())
-                
+
                 Image(systemName: "checkmark")
                     .font(.system(size: 32, weight: .bold))
                     .foregroundColor(.primary)
             }
-            
+
             Text("Saving...")
                 .font(.title)
                 .foregroundColor(.text)
-            
+
             Spacer()
         }
     }
-    
-    
-    
+
     private func completedSets(_ session: WorkoutSession) -> Int {
         session.exercises.reduce(0) { $0 + $1.sets.filter { $0.completed }.count }
     }
-    
+
     private func totalSets(_ session: WorkoutSession) -> Int {
         session.exercises.reduce(0) { $0 + $1.sets.count }
     }
-    
+
     private func progress(_ session: WorkoutSession) -> CGFloat {
         let total = totalSets(session)
         guard total > 0 else { return 0 }
         return CGFloat(completedSets(session)) / CGFloat(total)
     }
-    
+
     private func showSetCelebration() {
         celebrationMessage = ["Nice!", "Strong!", "Beast!", "Crushing it!", "Let's go!"].randomElement() ?? "Nice!"
         showCelebration = true
         HapticFeedback.light.trigger()
-        
+
         DispatchQueue.main.asyncAfter(deadline: .now() + WorkoutConstants.celebrationDuration) {
             showCelebration = false
         }
     }
-    
+
     private func showCompletionCelebration() {
         celebrationMessage = "Workout Complete! 🎉"
         showCelebration = true
         HapticFeedback.success.trigger()
     }
-    
+
     private func completeWorkoutWithSummary() async {
         guard sessionViewModel.currentSession != nil else { return }
-        
+
         restTimer.stopTimer()
         await sessionViewModel.completeWorkout()
         planStore.advanceAfterWorkout()
-        
+
         if sessionViewModel.error == nil {
             withAnimation(.spring(response: 0.6, dampingFraction: 0.8)) {
                 isCompleted = true
@@ -447,7 +441,7 @@ struct WorkoutFlowView: View {
             HapticFeedback.success.trigger()
         }
     }
-    
+
     private var smartSuggestion: String? {
         let hour = Calendar.current.component(.hour, from: Date())
         if hour < 12 {
@@ -458,24 +452,24 @@ struct WorkoutFlowView: View {
             return "💡 Evening workouts improve sleep quality"
         }
     }
-    
+
     private var canComplete: Bool {
         guard let session = sessionViewModel.currentSession else { return false }
         return completedSets(session) > 0
     }
-    
+
     private var completionView: some View {
         VStack(spacing: 0) {
             Spacer()
-            
+
             Text("💪")
                 .font(.system(size: 80))
-            
+
             Text("Workout Complete")
                 .font(.title)
                 .foregroundColor(.ink)
                 .padding(.top, Spacing.m)
-            
+
             if let session = sessionViewModel.currentSession {
                 VStack(spacing: Spacing.s) {
                     HStack(spacing: Spacing.xl) {
@@ -487,7 +481,7 @@ struct WorkoutFlowView: View {
                                 .font(.detail)
                                 .foregroundColor(.graphite)
                         }
-                        
+
                         VStack(spacing: 4) {
                             Text("\(session.exercises.count)")
                                 .font(.title)
@@ -496,7 +490,7 @@ struct WorkoutFlowView: View {
                                 .font(.detail)
                                 .foregroundColor(.graphite)
                         }
-                        
+
                         VStack(spacing: 4) {
                             Text("\(Int(displayVolume(totalVolume(session))))")
                                 .font(.title)
@@ -509,9 +503,9 @@ struct WorkoutFlowView: View {
                     .padding(.top, Spacing.l)
                 }
             }
-            
+
             Spacer()
-            
+
             Button {
                 dismiss()
             } label: {
@@ -527,13 +521,13 @@ struct WorkoutFlowView: View {
             .padding(Spacing.m)
         }
     }
-    
+
     private func totalVolume(_ session: WorkoutSession) -> Double {
         session.exercises.reduce(0.0) { total, exercise in
             total + exercise.sets.filter { $0.completed }.reduce(0.0) { $0 + ($1.weight * Double($1.reps)) }
         }
     }
-    
+
     private func displayVolume(_ totalVolumeLb: Double) -> Double {
         WeightConverter.toDisplay(weightLb: totalVolumeLb, unit: unitStore.unit)
     }
@@ -546,17 +540,17 @@ struct MinimalExerciseCard: View {
     let onDeleteSet: (UUID) -> Void
     let onReplace: () -> Void
     let onDeleteExercise: () -> Void
-    
+
     @ObservedObject private var unitStore = UnitSettingsStore.shared
     @State private var weightText = ""
     @State private var repsText = ""
     @State private var showDeleteConfirm = false
     @FocusState private var focusedField: Field?
-    
+
     enum Field {
         case weight, reps
     }
-    
+
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.s) {
             HStack {
@@ -564,16 +558,16 @@ struct MinimalExerciseCard: View {
                     Text(exercise.name.uppercased())
                         .font(.label)
                         .foregroundColor(.ink)
-                    
+
                     if !exercise.notes.isEmpty {
                         Text(exercise.notes)
                             .font(.detail)
                             .foregroundColor(.graphite)
                     }
                 }
-                
+
                 Spacer()
-                
+
                 Button {
                     showDeleteConfirm = true
                 } label: {
@@ -587,7 +581,7 @@ struct MinimalExerciseCard: View {
                 Button("Delete", role: .destructive) { onDeleteExercise() }
                 Button("Cancel", role: .cancel) {}
             }
-            
+
             if !exercise.sets.isEmpty {
                 VStack(spacing: 0) {
                     ForEach(Array(exercise.sets.enumerated()), id: \.element.id) { index, set in
@@ -600,7 +594,7 @@ struct MinimalExerciseCard: View {
                     }
                 }
             }
-            
+
             HStack(spacing: Spacing.s) {
                 TextField(unitStore.unit.symbol, text: $weightText)
                     .textFieldStyle(.plain)
@@ -610,11 +604,11 @@ struct MinimalExerciseCard: View {
                     .background(Color.ghost)
                     .foregroundColor(.ink)
                     .focused($focusedField, equals: .weight)
-                
+
                 Text("×")
                     .font(.body)
                     .foregroundColor(.ash)
-                
+
                 TextField("reps", text: $repsText)
                     .textFieldStyle(.plain)
                     .keyboardType(.numberPad)
@@ -626,9 +620,9 @@ struct MinimalExerciseCard: View {
                     .onSubmit {
                         if canAddSet { addSet() }
                     }
-                
+
                 Spacer()
-                
+
                 if focusedField != nil {
                     Button {
                         focusedField = nil
@@ -666,14 +660,14 @@ struct MinimalExerciseCard: View {
             }
         }
     }
-    
+
     private var canAddSet: Bool {
         !weightText.isEmpty && !repsText.isEmpty
     }
-    
+
     private func addSet() {
         guard let weight = Double(weightText), let reps = Int(repsText) else {
-            
+
             HapticFeedback.error.trigger()
             return
         }
@@ -699,7 +693,7 @@ struct MinimalSetRow: View {
     let onDelete: () -> Void
     @State private var showDeleteConfirm = false
     @ObservedObject private var unitStore = UnitSettingsStore.shared
-    
+
     var body: some View {
         HStack(spacing: Spacing.s) {
             Button(action: onToggle) {
@@ -707,18 +701,18 @@ struct MinimalSetRow: View {
                     .font(.title)
                     .foregroundColor(set.completed ? .primary : .ash)
             }
-            
+
             Text("\(index)")
                 .font(.body)
                 .foregroundColor(.ash)
                 .frame(width: 24)
-            
+
             Text("\(WeightFormatter.format(set.weight, unit: unitStore.unit))\(unitStore.unit.symbol) × \(set.reps)")
                 .font(.body)
                 .foregroundColor(.ink)
-            
+
             Spacer()
-            
+
             Button {
                 showDeleteConfirm = true
             } label: {
