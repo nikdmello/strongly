@@ -2,10 +2,11 @@ import SwiftUI
 
 struct MainTabView: View {
     @State private var selectedTab = 0
+    @StateObject private var planStore = SplitPlanStore()
 
     var body: some View {
         TabView(selection: $selectedTab) {
-            OnboardingView(tabSelection: $selectedTab)
+            TrainHomeView(tabSelection: $selectedTab)
                 .tabItem {
                     Label("Train", systemImage: "flame.fill")
                 }
@@ -23,7 +24,9 @@ struct MainTabView: View {
                 }
                 .tag(2)
         }
-        .accentColor(Color(hexString: "FFFFFF"))
+        .accentColor(.spaceGlow)
+        .preferredColorScheme(.dark)
+        .environmentObject(planStore)
     }
 }
 

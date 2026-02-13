@@ -50,6 +50,86 @@ enum MuscleGroup: String, CaseIterable, Codable {
     }
 }
 
+enum MuscleTrainingGroup: String, CaseIterable, Codable {
+    case chest
+    case back
+    case shoulders
+    case quads
+    case hamstrings
+    case glutes
+    case calves
+    case biceps
+    case triceps
+    case abs
+
+    var displayName: String {
+        switch self {
+        case .chest: return "Chest"
+        case .back: return "Back"
+        case .shoulders: return "Shoulders"
+        case .quads: return "Quads"
+        case .hamstrings: return "Hamstrings"
+        case .glutes: return "Glutes"
+        case .calves: return "Calves"
+        case .biceps: return "Biceps"
+        case .triceps: return "Triceps"
+        case .abs: return "Abs"
+        }
+    }
+
+    var muscles: [MuscleGroup] {
+        switch self {
+        case .chest:
+            return [.chestUpper, .chestLower]
+        case .back:
+            return [.backWidth, .backThickness]
+        case .shoulders:
+            return [.shoulderFront, .shoulderSide, .shoulderRear]
+        case .quads:
+            return [.quads]
+        case .hamstrings:
+            return [.hamstrings]
+        case .glutes:
+            return [.glutes]
+        case .calves:
+            return [.calves]
+        case .biceps:
+            return [.biceps]
+        case .triceps:
+            return [.triceps]
+        case .abs:
+            return [.abs]
+        }
+    }
+}
+
+extension MuscleGroup {
+    var trainingGroup: MuscleTrainingGroup {
+        switch self {
+        case .chestUpper, .chestLower:
+            return .chest
+        case .backWidth, .backThickness:
+            return .back
+        case .shoulderFront, .shoulderSide, .shoulderRear:
+            return .shoulders
+        case .quads:
+            return .quads
+        case .hamstrings:
+            return .hamstrings
+        case .glutes:
+            return .glutes
+        case .calves:
+            return .calves
+        case .biceps:
+            return .biceps
+        case .triceps:
+            return .triceps
+        case .abs:
+            return .abs
+        }
+    }
+}
+
 enum Equipment: String, CaseIterable, Codable {
     case barbell, dumbbell, cable, machine, bodyweight, band
 }
