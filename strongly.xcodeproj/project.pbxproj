@@ -10,7 +10,18 @@
 		F9509F962F258F7500C79E0C /* FirebaseAuth in Frameworks */ = {isa = PBXBuildFile; productRef = F9509F952F258F7500C79E0C /* FirebaseAuth */; };
 		F9509F982F258F7500C79E0C /* FirebaseCore in Frameworks */ = {isa = PBXBuildFile; productRef = F9509F972F258F7500C79E0C /* FirebaseCore */; };
 		F9509F9A2F258F7500C79E0C /* FirebaseFirestore in Frameworks */ = {isa = PBXBuildFile; productRef = F9509F992F258F7500C79E0C /* FirebaseFirestore */; };
+		FA00A0012F30000100AA0517 /* stronglyWidget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = FA00A0022F30000100AA0517 /* stronglyWidget.appex */; };
 /* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		FA00A00B2F30000100AA0517 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = F9AAD8382F24246C00A6E764 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = FA00A0032F30000100AA0517;
+			remoteInfo = stronglyWidget;
+		};
+/* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
 		F980AF9E2F29258000AA0517 /* Embed Foundation Extensions */ = {
@@ -19,6 +30,7 @@
 			dstPath = "";
 			dstSubfolderSpec = 13;
 			files = (
+				FA00A0012F30000100AA0517 /* stronglyWidget.appex in Embed Foundation Extensions */,
 			);
 			name = "Embed Foundation Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -29,6 +41,7 @@
 		F980AF892F29257E00AA0517 /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
 		F980AF8B2F29257E00AA0517 /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
 		F9AAD8402F24246C00A6E764 /* strongly.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = strongly.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		FA00A0022F30000100AA0517 /* stronglyWidget.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = stronglyWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -52,6 +65,13 @@
 				F9509F982F258F7500C79E0C /* FirebaseCore in Frameworks */,
 				F9509F962F258F7500C79E0C /* FirebaseAuth in Frameworks */,
 				F9509F9A2F258F7500C79E0C /* FirebaseFirestore in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		FA00A0042F30000100AA0517 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -81,6 +101,7 @@
 			isa = PBXGroup;
 			children = (
 				F9AAD8402F24246C00A6E764 /* strongly.app */,
+				FA00A0022F30000100AA0517 /* stronglyWidget.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -100,6 +121,7 @@
 			buildRules = (
 			);
 			dependencies = (
+				FA00A00A2F30000100AA0517 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				F9AAD8422F24246C00A6E764 /* strongly */,
@@ -114,6 +136,28 @@
 			productReference = F9AAD8402F24246C00A6E764 /* strongly.app */;
 			productType = "com.apple.product-type.application";
 		};
+		FA00A0032F30000100AA0517 /* stronglyWidget */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = FA00A0072F30000100AA0517 /* Build configuration list for PBXNativeTarget "stronglyWidget" */;
+			buildPhases = (
+				FA00A0062F30000100AA0517 /* Sources */,
+				FA00A0042F30000100AA0517 /* Frameworks */,
+				FA00A0052F30000100AA0517 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				F980AF8D2F29257E00AA0517 /* stronglyWidget */,
+			);
+			name = stronglyWidget;
+			packageProductDependencies = (
+			);
+			productName = stronglyWidget;
+			productReference = FA00A0022F30000100AA0517 /* stronglyWidget.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -125,6 +169,9 @@
 				LastUpgradeCheck = 2620;
 				TargetAttributes = {
 					F9AAD83F2F24246C00A6E764 = {
+						CreatedOnToolsVersion = 26.2;
+					};
+					FA00A0032F30000100AA0517 = {
 						CreatedOnToolsVersion = 26.2;
 					};
 				};
@@ -147,12 +194,20 @@
 			projectRoot = "";
 			targets = (
 				F9AAD83F2F24246C00A6E764 /* strongly */,
+				FA00A0032F30000100AA0517 /* stronglyWidget */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
 		F9AAD83E2F24246C00A6E764 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		FA00A0052F30000100AA0517 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -169,7 +224,22 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		FA00A0062F30000100AA0517 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		FA00A00A2F30000100AA0517 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = FA00A0032F30000100AA0517 /* stronglyWidget */;
+			targetProxy = FA00A00B2F30000100AA0517 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		F9AAD8492F24246D00A6E764 /* Debug */ = {
@@ -357,6 +427,58 @@
 			};
 			name = Release;
 		};
+		FA00A0082F30000100AA0517 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 7R6Z67X5UU;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Config/WidgetInfo.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = nikdmello.strongly.widget;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		FA00A0092F30000100AA0517 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 7R6Z67X5UU;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Config/WidgetInfo.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 26.2;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = nikdmello.strongly.widget;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -374,6 +496,15 @@
 			buildConfigurations = (
 				F9AAD84C2F24246D00A6E764 /* Debug */,
 				F9AAD84D2F24246D00A6E764 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		FA00A0072F30000100AA0517 /* Build configuration list for PBXNativeTarget "stronglyWidget" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				FA00A0082F30000100AA0517 /* Debug */,
+				FA00A0092F30000100AA0517 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
