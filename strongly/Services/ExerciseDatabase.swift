@@ -6,6 +6,11 @@ enum Difficulty: String, Codable {
     case advanced
 }
 
+enum ExerciseFocus: String, Codable {
+    case strength
+    case mobility
+}
+
 struct Exercise: Identifiable, Codable {
     let id: UUID
     let name: String
@@ -14,8 +19,9 @@ struct Exercise: Identifiable, Codable {
     let equipment: Equipment
     let isCompound: Bool
     let difficulty: Difficulty
+    let focus: ExerciseFocus
 
-    init(id: UUID = UUID(), name: String, primaryMuscles: [MuscleGroup], secondaryMuscles: [MuscleGroup] = [], equipment: Equipment, isCompound: Bool, difficulty: Difficulty = .intermediate) {
+    init(id: UUID = UUID(), name: String, primaryMuscles: [MuscleGroup], secondaryMuscles: [MuscleGroup] = [], equipment: Equipment, isCompound: Bool, difficulty: Difficulty = .intermediate, focus: ExerciseFocus = .strength) {
         self.id = id
         self.name = name
         self.primaryMuscles = primaryMuscles
@@ -23,6 +29,7 @@ struct Exercise: Identifiable, Codable {
         self.equipment = equipment
         self.isCompound = isCompound
         self.difficulty = difficulty
+        self.focus = focus
     }
 }
 
@@ -77,7 +84,24 @@ final class ExerciseDatabase {
         Exercise(name: "Crunches", primaryMuscles: [.abs], equipment: .bodyweight, isCompound: false, difficulty: .beginner),
         Exercise(name: "Cable Crunch", primaryMuscles: [.abs], equipment: .cable, isCompound: false),
         Exercise(name: "Hanging Leg Raise", primaryMuscles: [.abs], equipment: .bodyweight, isCompound: false, difficulty: .advanced),
-        Exercise(name: "Russian Twist", primaryMuscles: [.abs], equipment: .bodyweight, isCompound: false)
+        Exercise(name: "Russian Twist", primaryMuscles: [.abs], equipment: .bodyweight, isCompound: false),
+
+        Exercise(name: "Scapular Push-up", primaryMuscles: [.shoulderRear, .shoulderFront], secondaryMuscles: [.chestUpper], equipment: .bodyweight, isCompound: false, difficulty: .beginner, focus: .mobility),
+        Exercise(name: "Wall Slides", primaryMuscles: [.shoulderRear, .shoulderSide], equipment: .bodyweight, isCompound: false, difficulty: .beginner, focus: .mobility),
+        Exercise(name: "Thoracic Rotation", primaryMuscles: [.backThickness, .abs], equipment: .bodyweight, isCompound: false, difficulty: .beginner, focus: .mobility),
+        Exercise(name: "Cat-Cow", primaryMuscles: [.backThickness, .abs], equipment: .bodyweight, isCompound: false, difficulty: .beginner, focus: .mobility),
+        Exercise(name: "Hip Airplane", primaryMuscles: [.glutes, .hamstrings], secondaryMuscles: [.abs], equipment: .bodyweight, isCompound: false, difficulty: .advanced, focus: .mobility),
+        Exercise(name: "90/90 Hip Switch", primaryMuscles: [.glutes, .hamstrings], equipment: .bodyweight, isCompound: false, difficulty: .beginner, focus: .mobility),
+        Exercise(name: "Deep Squat Hold", primaryMuscles: [.quads, .glutes, .calves], equipment: .bodyweight, isCompound: false, difficulty: .beginner, focus: .mobility),
+        Exercise(name: "Ankle Dorsiflexion Drill", primaryMuscles: [.calves], equipment: .band, isCompound: false, difficulty: .beginner, focus: .mobility),
+        Exercise(name: "Cossack Squat", primaryMuscles: [.quads, .glutes, .hamstrings], equipment: .bodyweight, isCompound: false, difficulty: .intermediate, focus: .mobility),
+        Exercise(name: "Dead Bug", primaryMuscles: [.abs], secondaryMuscles: [.glutes], equipment: .bodyweight, isCompound: false, difficulty: .beginner, focus: .mobility),
+        Exercise(name: "Bird Dog", primaryMuscles: [.abs, .glutes], secondaryMuscles: [.backThickness], equipment: .bodyweight, isCompound: false, difficulty: .beginner, focus: .mobility),
+        Exercise(name: "Side Plank Reach", primaryMuscles: [.abs, .shoulderSide], equipment: .bodyweight, isCompound: false, difficulty: .beginner, focus: .mobility),
+        Exercise(name: "Goblet Squat Hold", primaryMuscles: [.quads, .glutes, .abs], equipment: .dumbbell, isCompound: false, difficulty: .intermediate, focus: .mobility),
+        Exercise(name: "Farmer Carry", primaryMuscles: [.backThickness, .abs, .glutes], equipment: .dumbbell, isCompound: true, difficulty: .intermediate, focus: .mobility),
+        Exercise(name: "Single-Arm Overhead Carry", primaryMuscles: [.shoulderSide, .abs, .glutes], equipment: .dumbbell, isCompound: false, difficulty: .intermediate, focus: .mobility),
+        Exercise(name: "Turkish Get-Up", primaryMuscles: [.shoulderFront, .abs, .glutes], secondaryMuscles: [.hamstrings], equipment: .dumbbell, isCompound: true, difficulty: .advanced, focus: .mobility)
     ]
 
     func search(_ query: String) -> [Exercise] {
@@ -89,12 +113,18 @@ final class ExerciseDatabase {
         }
     }
 
-    func filter(muscle: MuscleGroup? = nil, equipment: Equipment? = nil, difficulty: Difficulty? = nil) -> [Exercise] {
-        var filtered = exercises
+    func filter(
+        muscles: Set<MuscleGroup> = [],
+        equipment: Equipment? = nil,
+        difficulty: Difficulty? = nil,
+        source: [Exercise]? = nil
+    ) -> [Exercise] {
+        var filtered = source ?? exercises
 
-        if let muscle = muscle {
-            filtered = filtered.filter {
-                $0.primaryMuscles.contains(muscle) || $0.secondaryMuscles.contains(muscle)
+        if !muscles.isEmpty {
+            filtered = filtered.filter { exercise in
+                let targets = Set(exercise.primaryMuscles + exercise.secondaryMuscles)
+                return !targets.isDisjoint(with: muscles)
             }
         }
 

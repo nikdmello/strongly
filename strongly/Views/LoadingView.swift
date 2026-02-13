@@ -2,11 +2,40 @@ import SwiftUI
 
 struct LoadingView: View {
     @State private var stars: [Star] = []
-    @State private var showOnboarding = false
+    @State private var showMainApp = false
+    @State private var transitionProgress: CGFloat = 0
+    @State private var promptVisible = false
+    @State private var hasHandledTap = false
 
     var body: some View {
         ZStack {
+            if showMainApp {
+                MainTabView()
+                    .opacity(transitionProgress)
+                    .transition(.opacity)
+            }
 
+            welcomeLayer
+                .opacity(1 - transitionProgress)
+                .blur(radius: 4 * transitionProgress)
+                .allowsHitTesting(!showMainApp)
+                .transition(.opacity)
+        }
+        .animation(.easeInOut(duration: 0.55), value: transitionProgress)
+        .onAppear {
+            generateStars()
+            animateStars()
+            withAnimation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true)) {
+                promptVisible = true
+            }
+        }
+        .onTapGesture {
+            transitionToMainApp()
+        }
+    }
+
+    private var welcomeLayer: some View {
+        ZStack {
             LinearGradient(
                 colors: [Color(hexString: "0a0e27"), Color(hexString: "1a1f3a"), Color(hexString: "0a0e27")],
                 startPoint: .topLeading,
@@ -45,26 +74,9 @@ struct LoadingView: View {
                     .foregroundColor(.white.opacity(0.6))
                     .tracking(2)
                     .padding(.bottom, 60)
-                    .opacity(pulseOpacity)
+                    .opacity(promptVisible ? 1 : 0.35)
             }
         }
-        .onAppear {
-            generateStars()
-            animateStars()
-        }
-        .onTapGesture {
-            explodeStars()
-            HapticFeedback.heavy.trigger()
-            showOnboarding = true
-        }
-        .fullScreenCover(isPresented: $showOnboarding) {
-            MainTabView()
-        }
-    }
-
-    private var pulseOpacity: Double {
-        let animation = Animation.easeInOut(duration: 1.5).repeatForever(autoreverses: true)
-        return withAnimation(animation) { 0.3 }
     }
 
     private func generateStars() {
@@ -99,20 +111,13 @@ struct LoadingView: View {
         }
     }
 
-    private func explodeStars() {
-        let center = CGPoint(x: 200, y: 400)
-
-        withAnimation(.easeOut(duration: 0.6)) {
-            for i in stars.indices {
-                let dx = stars[i].position.x - center.x
-                let dy = stars[i].position.y - center.y
-                let distance = sqrt(dx * dx + dy * dy)
-                let normalized = CGPoint(x: dx / distance, y: dy / distance)
-
-                stars[i].position.x += normalized.x * 2000
-                stars[i].position.y += normalized.y * 2000
-                stars[i].opacity = 0
-            }
+    private func transitionToMainApp() {
+        guard !hasHandledTap else { return }
+        hasHandledTap = true
+        HapticFeedback.heavy.trigger()
+        showMainApp = true
+        withAnimation(.easeInOut(duration: 0.62)) {
+            transitionProgress = 1
         }
     }
 }

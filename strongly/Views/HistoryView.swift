@@ -3,26 +3,48 @@ import Combine
 
 struct HistoryView: View {
     @StateObject private var viewModel = HistoryViewModel()
-    @State private var trainingDays = 5
 
     var body: some View {
         NavigationView {
             ZStack {
-                Color.black.ignoresSafeArea()
+                StarfieldBackground()
 
                 if viewModel.isLoading {
                     ProgressView()
+                        .tint(.spaceGlow)
                 } else {
                     ScrollView {
                         LazyVStack(spacing: Space.m) {
-                            WeeklyVolumeSection(sessions: viewModel.sessions, trainingDays: $trainingDays)
+                            WeeklyVolumeSection(sessions: viewModel.sessions)
 
                             if viewModel.sessions.isEmpty {
                                 emptyState
                             } else {
-                            ForEach(viewModel.sessions) { session in
-                                WorkoutCard(session: session)
-                            }
+                                if let mostRecentSession {
+                                    WorkoutCard(session: mostRecentSession)
+                                }
+
+                                if viewModel.sessions.count > 1 {
+                                    NavigationLink {
+                                        AllWorkoutsView(
+                                            sessions: viewModel.sessions,
+                                            onDeleteSession: { sessionId in
+                                                Task {
+                                                    await viewModel.delete(sessionId: sessionId)
+                                                }
+                                            }
+                                        )
+                                    } label: {
+                                        Text("See All Workouts")
+                                            .font(.system(size: 14, weight: .semibold))
+                                            .foregroundColor(.spaceNavy)
+                                            .frame(maxWidth: .infinity)
+                                            .padding(.vertical, 12)
+                                            .background(Color.spaceGlow)
+                                            .cornerRadius(12)
+                                    }
+                                    .buttonStyle(.plain)
+                                }
                             }
                         }
                         .padding(Space.l)
@@ -36,6 +58,15 @@ struct HistoryView: View {
         .task {
             await viewModel.load()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .workoutHistoryDidChange)) { _ in
+            Task {
+                await viewModel.load()
+            }
+        }
+    }
+
+    private var mostRecentSession: WorkoutSession? {
+        viewModel.sessions.first
     }
 
     private var emptyState: some View {
@@ -58,36 +89,14 @@ struct HistoryView: View {
 
 struct WeeklyVolumeSection: View {
     let sessions: [WorkoutSession]
-    @Binding var trainingDays: Int
 
     private let targetSets = TrainingTargets.advancedWeeklySets
 
     var body: some View {
         VStack(alignment: .leading, spacing: Space.m) {
-            HStack(alignment: .firstTextBaseline) {
-                Text("Weekly Volume")
-                    .font(.system(size: 18, weight: .bold))
-                    .foregroundColor(.white)
-
-                Spacer()
-
-                Text("Target \(formatSets(targetSets)) sets")
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(.white.opacity(0.6))
-            }
-
-            Picker("Training Days", selection: $trainingDays) {
-                Text("5 days").tag(5)
-                Text("6 days").tag(6)
-            }
-            .pickerStyle(.segmented)
-            .tint(.white)
-            .background(Color.white.opacity(0.15))
-            .cornerRadius(8)
-
-            Text(perWorkoutSummary)
-                .font(.system(size: 14, weight: .medium))
-                .foregroundColor(.white.opacity(0.6))
+            Text("Weekly Volume")
+                .font(.system(size: 18, weight: .bold))
+                .foregroundColor(.white)
 
             VStack(spacing: Space.s) {
                 ForEach(MuscleGroup.allCases, id: \.self) { muscle in
@@ -96,14 +105,7 @@ struct WeeklyVolumeSection: View {
             }
         }
         .padding(Space.l)
-        .background(Color.gray900)
-        .cornerRadius(16)
-        .shadow(color: .black.opacity(0.4), radius: 8, y: 2)
-    }
-
-    private var perWorkoutSummary: String {
-        let perWorkout = targetSets / Double(trainingDays)
-        return "Spread \(formatSets(targetSets)) sets across \(trainingDays) days ≈ \(formatSets(perWorkout)) sets per muscle per session."
+        .themedCard()
     }
 
     private func weeklyRow(for muscle: MuscleGroup) -> some View {
@@ -112,9 +114,7 @@ struct WeeklyVolumeSection: View {
 
         return VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text(muscle.displayName)
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundColor(.white)
+                MuscleBadge(muscle: muscle, compact: true)
 
                 Spacer()
 
@@ -130,7 +130,7 @@ struct WeeklyVolumeSection: View {
                         .frame(height: 8)
 
                     Capsule()
-                        .fill(Color.white)
+                        .fill(muscle.tint)
                         .frame(width: max(6, CGFloat(progress) * geo.size.width), height: 8)
                 }
             }
@@ -186,15 +186,83 @@ struct WorkoutCard: View {
                         .foregroundColor(.white.opacity(0.6))
                 }
             }
+
+            if !sessionMuscles.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(sessionMuscles, id: \.self) { muscle in
+                            MuscleBadge(muscle: muscle, compact: true)
+                        }
+                    }
+                }
+            }
         }
         .padding(Space.l)
-        .background(Color.gray900)
-        .cornerRadius(16)
+        .themedCard()
     }
 
     private func formatDuration(_ seconds: TimeInterval) -> String {
         let minutes = Int(seconds) / 60
         return "\(minutes)m"
+    }
+
+    private var sessionMuscles: [MuscleGroup] {
+        var muscles = Set<MuscleGroup>()
+        for exercise in session.exercises {
+            if let metadata = ExerciseDatabase.shared.getExercise(named: exercise.name) {
+                for muscle in metadata.primaryMuscles {
+                    muscles.insert(muscle)
+                }
+            }
+        }
+        return muscles.sorted { $0.displayName < $1.displayName }
+    }
+}
+
+struct AllWorkoutsView: View {
+    let onDeleteSession: (UUID) -> Void
+    @State private var displayedSessions: [WorkoutSession]
+
+    init(sessions: [WorkoutSession], onDeleteSession: @escaping (UUID) -> Void) {
+        self.onDeleteSession = onDeleteSession
+        self._displayedSessions = State(initialValue: sessions)
+    }
+
+    var body: some View {
+        ZStack {
+            StarfieldBackground()
+
+            List {
+                ForEach(displayedSessions) { session in
+                    ZStack {
+                        WorkoutCard(session: session)
+                    }
+                    .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 12, trailing: 0))
+                    .listRowBackground(Color.clear)
+                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                        Button(role: .destructive) {
+                            HapticFeedback.warning.trigger()
+                            delete(session)
+                        } label: {
+                            Image(systemName: "trash")
+                        }
+                    }
+                }
+            }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .background(Color.clear)
+        }
+        .navigationTitle("All Workouts")
+        .navigationBarTitleDisplayMode(.inline)
+        .preferredColorScheme(.dark)
+    }
+
+    private func delete(_ session: WorkoutSession) {
+        withAnimation(Motion.quick) {
+            displayedSessions.removeAll { $0.id == session.id }
+        }
+        onDeleteSession(session.id)
     }
 }
 
@@ -210,6 +278,16 @@ final class HistoryViewModel: ObservableObject {
         sessions = (try? await repository.fetchAll()) ?? []
         sessions.sort { $0.date > $1.date }
         isLoading = false
+    }
+
+    func delete(sessionId: UUID) async {
+        do {
+            try await repository.delete(sessionId)
+            sessions.removeAll { $0.id == sessionId }
+        } catch {
+            sessions = (try? await repository.fetchAll()) ?? sessions
+            sessions.sort { $0.date > $1.date }
+        }
     }
 }
 

@@ -1,6 +1,10 @@
 import SwiftUI
 import Combine
 
+extension Notification.Name {
+    static let workoutHistoryDidChange = Notification.Name("workoutHistoryDidChange")
+}
+
 @MainActor
 final class WorkoutSessionViewModel: ObservableObject {
     @Published var currentSession: WorkoutSession?
@@ -67,10 +71,10 @@ final class WorkoutSessionViewModel: ObservableObject {
     func addSet(to exerciseId: UUID, weight: Double, reps: Int) {
         let sanitizedWeight = (weight * 10).rounded() / 10
 
-        guard sanitizedWeight > 0, sanitizedWeight <= 1000 else {
+        guard sanitizedWeight >= 0, sanitizedWeight <= 1000 else {
             let unit = UnitSettingsStore.shared.unit
             let maxDisplay = WeightConverter.toDisplay(weightLb: 1000, unit: unit)
-            let message = "Weight must be between 0.1 and \(Int(maxDisplay))\(unit.symbol)"
+            let message = "Weight must be between 0 and \(Int(maxDisplay))\(unit.symbol)"
             error = NSError(domain: "WorkoutSession", code: 1, userInfo: [NSLocalizedDescriptionKey: message])
             return
         }
@@ -157,6 +161,7 @@ final class WorkoutSessionViewModel: ObservableObject {
             await MainActor.run {
                 ProgressionEngine.updateProgress(from: session)
             }
+            NotificationCenter.default.post(name: .workoutHistoryDidChange, object: nil)
             currentSession = nil
             isActive = false
             error = nil

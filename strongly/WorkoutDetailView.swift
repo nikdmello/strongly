@@ -9,29 +9,31 @@ struct WorkoutDetailView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: Spacing.l) {
-                    dateTimeSection
-                    muscleBreakdownSection
-                    exercisesSection
+            ZStack {
+                StarfieldBackground()
+                ScrollView {
+                    VStack(alignment: .leading, spacing: Spacing.l) {
+                        dateTimeSection
+                        muscleBreakdownSection
+                        exercisesSection
 
-                    Button {
-                        dismiss()
-                    } label: {
-                        Text("Close")
-                            .font(.body)
-                            .fontWeight(.semibold)
-                            .foregroundColor(.white)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, Spacing.m)
-                            .background(Color.black)
-                            .cornerRadius(12)
+                        Button {
+                            dismiss()
+                        } label: {
+                            Text("Close")
+                                .font(.body)
+                                .fontWeight(.semibold)
+                                .foregroundColor(.spaceNavy)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, Spacing.m)
+                                .background(Color.spaceGlow)
+                                .cornerRadius(12)
+                        }
+                        .padding(.top, Spacing.l)
                     }
-                    .padding(.top, Spacing.l)
+                    .padding(Spacing.m)
                 }
-                .padding(Spacing.m)
             }
-            .background(Color.paper)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
@@ -45,12 +47,14 @@ struct WorkoutDetailView: View {
         VStack(alignment: .leading, spacing: Spacing.xs) {
             Text(session.date.formatted(date: .complete, time: .omitted))
                 .font(.mega)
-                .foregroundColor(.ink)
+                .foregroundColor(.white)
 
             Text(session.date.formatted(date: .omitted, time: .shortened))
                 .font(.title)
-                .foregroundColor(.graphite)
+                .foregroundColor(.white.opacity(0.72))
         }
+        .padding(Spacing.m)
+        .themedCard(cornerRadius: 18)
     }
 
     private var muscleBreakdownSection: some View {
@@ -64,19 +68,22 @@ struct WorkoutDetailView: View {
                     HStack {
                         Text(muscle.displayName)
                             .font(.body)
-                            .foregroundColor(.ink)
+                            .foregroundColor(.white)
 
                         Spacer()
 
                         Text("\(formatSets(sets)) sets")
                             .font(.body)
-                            .foregroundColor(.graphite)
+                            .foregroundColor(.white.opacity(0.7))
                     }
                     .padding(Spacing.s)
-                    .background(Color.ghost)
+                    .background(Color.white.opacity(0.08))
+                    .cornerRadius(10)
                 }
             }
         }
+        .padding(Spacing.m)
+        .themedCard(cornerRadius: 18)
     }
 
     private var muscleVolume: [MuscleGroup: Double] {
@@ -118,6 +125,8 @@ struct WorkoutDetailView: View {
                 }
             }
         }
+        .padding(Spacing.m)
+        .themedCard(cornerRadius: 18)
     }
 
     private var content: some View {
@@ -135,7 +144,7 @@ struct WorkoutDetailView: View {
         VStack(alignment: .leading, spacing: Spacing.s) {
             Text(exercise.name.uppercased())
                 .font(.label)
-                .foregroundColor(.ink)
+                .foregroundColor(.white)
 
             VStack(spacing: 0) {
                 ForEach(Array(exercise.sets.enumerated()), id: \.element.id) { index, set in
@@ -158,7 +167,7 @@ struct WorkoutDetailView: View {
 
             Text("\(WeightFormatter.format(set.weight, unit: unitStore.unit))\(unitStore.unit.symbol) × \(set.reps)")
                 .font(.body)
-                .foregroundColor(.ink)
+                .foregroundColor(.white)
 
             Spacer()
         }
@@ -172,7 +181,7 @@ struct WorkoutDetailView: View {
         } label: {
             Text("Close")
                 .font(.body)
-                .foregroundColor(.graphite)
+                .foregroundColor(.white.opacity(0.75))
         }
     }
 }

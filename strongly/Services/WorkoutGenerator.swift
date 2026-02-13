@@ -6,10 +6,17 @@ enum EquipmentType: String, CaseIterable {
     case both = "Both"
 }
 
+enum WorkoutFocus: String, CaseIterable {
+    case strength = "Strength"
+    case balanced = "Balanced"
+    case mobility = "Mobility"
+}
+
 struct WorkoutRequest {
     let duration: Int
     let targetMuscles: [MuscleGroup]
     let equipment: EquipmentType
+    let focus: WorkoutFocus
     let preferredExercises: [String]
 }
 
@@ -254,18 +261,65 @@ class WorkoutGenerator {
             reasons.append("You do this often")
         }
 
+        let (focusScore, focusReason) = scoreForFocus(exercise, focus: request.focus)
+        score += focusScore
+        if let reason = focusReason {
+            reasons.append(reason)
+        }
+
         score += scoreStrategy(exercise, profile: profile, strategy: strategy, reasons: &reasons)
 
         return ExerciseScore(exercise: exercise, score: score, reasons: reasons)
     }
 
     private func scoreTargetMuscles(_ exercise: Exercise, request: WorkoutRequest) -> (Double, String?) {
-        let overlap = exercise.primaryMuscles.filter { request.targetMuscles.contains($0) }.count
+        let targetSet = Set(request.targetMuscles)
+        let primaryOverlap = exercise.primaryMuscles.filter { targetSet.contains($0) }.count
+        let secondaryOverlap = exercise.secondaryMuscles.filter { targetSet.contains($0) }.count
+        let overlap = primaryOverlap + secondaryOverlap
         guard overlap > 0 else { return (0, nil) }
 
-        let score = Double(overlap) * 20
-        let muscles = exercise.primaryMuscles.map { $0.displayName }.joined(separator: ", ")
+        let score = Double(primaryOverlap) * 20 + Double(secondaryOverlap) * 10
+        let muscles = Array(Set(exercise.primaryMuscles + exercise.secondaryMuscles))
+            .map { $0.displayName }
+            .sorted()
+            .joined(separator: ", ")
         return (score, "Targets \(muscles)")
+    }
+
+    private func scoreForFocus(_ exercise: Exercise, focus: WorkoutFocus) -> (Double, String?) {
+        switch focus {
+        case .strength:
+            if exercise.focus == .strength {
+                return (12, "Strength priority")
+            }
+            return (-8, nil)
+        case .balanced:
+            if exercise.focus == .mobility {
+                return (8, "Adds mobility work")
+            }
+            return (6, nil)
+        case .mobility:
+            var score = 0.0
+            var reason: String?
+
+            if exercise.focus == .mobility {
+                score += 28
+                reason = "Mobility priority"
+            } else {
+                score -= 12
+            }
+
+            if exercise.equipment == .bodyweight || exercise.equipment == .band {
+                score += 10
+            }
+
+            if exercise.isCompound {
+                score -= 4
+            }
+
+            return (score, reason)
+        }
     }
 
     private func scoreRecovery(_ exercise: Exercise, profile: UserTrainingProfile) -> (Double, String?) {
@@ -303,7 +357,7 @@ class WorkoutGenerator {
         } else if minDaysSinceWorked >= recoveryWindow * 0.7 {
             return (15, "Adequate recovery")
         } else {
-            return (-10, "Recently trained")
+            return (-10, nil)
         }
     }
 
@@ -338,29 +392,131 @@ class WorkoutGenerator {
     ) -> [ExerciseScore] {
         let setsPerExercise = 3
         let timePerSet = 3
-        let maxExercises = request.duration / (setsPerExercise * timePerSet)
+        let maxExercises = max(1, request.duration / (setsPerExercise * timePerSet))
 
         var selected: [ExerciseScore] = []
         var coveredMuscles: Set<MuscleGroup> = []
+        let targetSet = Set(request.targetMuscles)
+        let targetScored = scored.filter { score in
+            let primary = Set(score.exercise.primaryMuscles)
+            let secondary = Set(score.exercise.secondaryMuscles)
+            return !primary.intersection(targetSet).isEmpty || !secondary.intersection(targetSet).isEmpty
+        }
 
-        for scored in scored {
+        for scored in targetScored {
             if selected.count >= maxExercises { break }
 
-            let newMuscles = Set(scored.exercise.primaryMuscles).subtracting(coveredMuscles)
-            if !newMuscles.isEmpty && request.targetMuscles.contains(where: newMuscles.contains) {
+            let coveredByExercise = Set(scored.exercise.primaryMuscles + scored.exercise.secondaryMuscles)
+            let newMuscles = coveredByExercise.intersection(targetSet).subtracting(coveredMuscles)
+            if !newMuscles.isEmpty {
                 selected.append(scored)
-                coveredMuscles.formUnion(scored.exercise.primaryMuscles)
+                coveredMuscles.formUnion(coveredByExercise)
             }
         }
 
-        for scored in scored {
+        for scored in targetScored {
             if selected.count >= maxExercises { break }
             if !selected.contains(where: { $0.exercise.id == scored.exercise.id }) {
                 selected.append(scored)
             }
         }
 
+        if selected.isEmpty {
+            for scored in scored {
+                if selected.count >= maxExercises { break }
+                if !selected.contains(where: { $0.exercise.id == scored.exercise.id }) {
+                    selected.append(scored)
+                }
+            }
+        }
+
+        selected = ensureMobilityPresence(
+            selected: selected,
+            candidates: targetScored.isEmpty ? scored : targetScored,
+            maxExercises: maxExercises,
+            request: request
+        )
+
+        selected = ensureEquipmentMix(
+            selected: selected,
+            candidates: targetScored.isEmpty ? scored : targetScored,
+            maxExercises: maxExercises,
+            request: request
+        )
+
         return selected
+    }
+
+    private func ensureMobilityPresence(
+        selected: [ExerciseScore],
+        candidates: [ExerciseScore],
+        maxExercises: Int,
+        request: WorkoutRequest
+    ) -> [ExerciseScore] {
+        guard request.focus != .strength else { return selected }
+        if selected.contains(where: { $0.exercise.focus == .mobility }) {
+            return selected
+        }
+
+        guard let mobilityCandidate = candidates.first(where: { candidate in
+            candidate.exercise.focus == .mobility &&
+            !selected.contains(where: { existing in existing.exercise.id == candidate.exercise.id })
+        }) else {
+            return selected
+        }
+
+        var updated = selected
+        if updated.count < maxExercises {
+            updated.append(mobilityCandidate)
+        } else if !updated.isEmpty {
+            updated[updated.count - 1] = mobilityCandidate
+        }
+        return updated
+    }
+
+    private func ensureEquipmentMix(
+        selected: [ExerciseScore],
+        candidates: [ExerciseScore],
+        maxExercises: Int,
+        request: WorkoutRequest
+    ) -> [ExerciseScore] {
+        guard request.equipment == .both || request.focus == .balanced || request.focus == .mobility else {
+            return selected
+        }
+
+        var updated = selected
+        let hasBodyweight = updated.contains(where: { isBodyweightOrBand($0.exercise.equipment) })
+        let hasLoaded = updated.contains(where: { !isBodyweightOrBand($0.exercise.equipment) })
+
+        if !hasBodyweight,
+           let candidate = candidates.first(where: { score in
+               isBodyweightOrBand(score.exercise.equipment) &&
+               !updated.contains(where: { $0.exercise.id == score.exercise.id })
+           }) {
+            if updated.count < maxExercises {
+                updated.append(candidate)
+            } else if !updated.isEmpty {
+                updated[updated.count - 1] = candidate
+            }
+        }
+
+        if !hasLoaded,
+           let candidate = candidates.first(where: { score in
+               !isBodyweightOrBand(score.exercise.equipment) &&
+               !updated.contains(where: { $0.exercise.id == score.exercise.id })
+           }) {
+            if updated.count < maxExercises {
+                updated.append(candidate)
+            } else if !updated.isEmpty {
+                updated[updated.count - 1] = candidate
+            }
+        }
+
+        return updated
+    }
+
+    private func isBodyweightOrBand(_ equipment: Equipment) -> Bool {
+        equipment == .bodyweight || equipment == .band
     }
 
     private func buildExerciseLogs(
@@ -383,8 +539,7 @@ class WorkoutGenerator {
                 )
             }
 
-            let notes = scored.reasons.prefix(2).joined(separator: " • ")
-            logs.append(ExerciseLog(name: scored.exercise.name, sets: sets, notes: notes))
+            logs.append(ExerciseLog(name: scored.exercise.name, sets: sets, notes: ""))
         }
 
         return logs
@@ -405,6 +560,15 @@ class WorkoutGenerator {
             parts.append("⚖️ Balancing muscle groups")
         case .progressive:
             parts.append("📈 Progressive overload focus")
+        }
+
+        switch request.focus {
+        case .strength:
+            parts.append("🏋️ Strength session")
+        case .balanced:
+            parts.append("⚖️ Balanced strength + mobility")
+        case .mobility:
+            parts.append("🧘 Mobility and control session")
         }
 
         let targetMuscles = Set(selected.flatMap { $0.exercise.primaryMuscles })

@@ -5,20 +5,21 @@ struct ExercisePickerView: View {
     let onSelect: (Exercise) -> Void
 
     @State private var searchText = ""
-    @State private var selectedMuscle: MuscleGroup?
+    @State private var selectedMuscles: Set<MuscleGroup> = []
     @State private var selectedEquipment: Equipment?
     @State private var recentExercises: [Exercise] = []
 
     private var filteredExercises: [Exercise] {
         let database = ExerciseDatabase.shared
 
-        if !searchText.isEmpty {
-            return database.search(searchText)
-        }
+        let base = searchText.isEmpty
+            ? database.exercises
+            : database.search(searchText)
 
         return database.filter(
-            muscle: selectedMuscle,
-            equipment: selectedEquipment
+            muscles: selectedMuscles,
+            equipment: selectedEquipment,
+            source: base
         )
     }
 
@@ -30,13 +31,14 @@ struct ExercisePickerView: View {
                 Divider()
                 resultsList
             }
-            .background(Color.background)
+            .background(StarfieldBackground())
             .navigationTitle("Add Exercise")
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
                         .font(.body)
+                        .foregroundColor(.white.opacity(0.8))
                 }
             }
             .task {
@@ -73,11 +75,12 @@ struct ExercisePickerView: View {
         HStack(spacing: Spacing.m) {
             Image(systemName: "magnifyingglass")
                 .font(.body)
-                .foregroundColor(.textSecondary)
+                .foregroundColor(.white.opacity(0.7))
 
             TextField("Search exercises", text: $searchText)
                 .font(.body)
                 .textFieldStyle(.plain)
+                .foregroundColor(.white)
 
             if !searchText.isEmpty {
                 Button {
@@ -85,13 +88,12 @@ struct ExercisePickerView: View {
                 } label: {
                     Image(systemName: "xmark.circle.fill")
                         .font(.body)
-                        .foregroundColor(.textTertiary)
+                        .foregroundColor(.white.opacity(0.6))
                 }
             }
         }
         .padding(Spacing.m)
-        .background(Color.surface)
-        .cornerRadius(10)
+        .themedCard(cornerRadius: 12)
         .padding(.horizontal, Spacing.l)
         .padding(.vertical, Spacing.m)
     }
@@ -99,12 +101,25 @@ struct ExercisePickerView: View {
     private var filterSection: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: Spacing.s) {
+                FilterChip(
+                    title: "All",
+                    symbolName: "line.3.horizontal.decrease.circle",
+                    isSelected: selectedMuscles.isEmpty
+                ) {
+                    selectedMuscles.removeAll()
+                }
+
                 ForEach(MuscleGroup.allCases, id: \.self) { muscle in
                     FilterChip(
                         title: muscle.displayName,
-                        isSelected: selectedMuscle == muscle
+                        symbolName: muscle.symbolName,
+                        isSelected: selectedMuscles.contains(muscle)
                     ) {
-                        selectedMuscle = selectedMuscle == muscle ? nil : muscle
+                        if selectedMuscles.contains(muscle) {
+                            selectedMuscles.remove(muscle)
+                        } else {
+                            selectedMuscles.insert(muscle)
+                        }
                     }
                 }
             }
@@ -121,7 +136,7 @@ struct ExercisePickerView: View {
                     VStack(alignment: .leading, spacing: Spacing.s) {
                         Text("RECENT")
                             .font(.micro)
-                            .foregroundColor(.ash)
+                            .foregroundColor(.white.opacity(0.6))
                             .padding(.horizontal, Spacing.l)
                             .padding(.top, Spacing.m)
 
@@ -142,7 +157,7 @@ struct ExercisePickerView: View {
 
                         Text("ALL EXERCISES")
                             .font(.micro)
-                            .foregroundColor(.ash)
+                            .foregroundColor(.white.opacity(0.6))
                             .padding(.horizontal, Spacing.l)
                     }
                 }
@@ -173,48 +188,63 @@ struct ExerciseRow: View {
                 VStack(alignment: .leading, spacing: Spacing.xs) {
                     Text(exercise.name)
                         .font(.body)
-                        .foregroundColor(.text)
+                        .foregroundColor(.white)
 
-                    Text(muscleText)
-                        .font(.footnote)
-                        .foregroundColor(.textSecondary)
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 6) {
+                            ForEach(Array(exercise.primaryMuscles.prefix(3)), id: \.self) { muscle in
+                                MuscleBadge(muscle: muscle, compact: true)
+                            }
+                            if exercise.primaryMuscles.count > 3 {
+                                Text("+\(exercise.primaryMuscles.count - 3)")
+                                    .font(.system(size: 10, weight: .bold))
+                                    .foregroundColor(.white.opacity(0.75))
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 5)
+                                    .background(Color.white.opacity(0.12))
+                                    .clipShape(Capsule())
+                            }
+                        }
+                    }
                 }
 
                 Spacer()
 
                 Text(exercise.equipment.rawValue.capitalized)
                     .font(.caption)
-                    .foregroundColor(.textSecondary)
+                    .foregroundColor(.white.opacity(0.7))
                     .padding(.horizontal, Spacing.s)
                     .padding(.vertical, Spacing.xs)
-                    .background(Color.surface)
+                    .background(Color.white.opacity(0.14))
                     .cornerRadius(6)
             }
             .padding(.horizontal, Spacing.l)
             .padding(.vertical, Spacing.m)
+            .themedCard(cornerRadius: 14)
         }
         .buttonStyle(.plain)
-    }
-
-    private var muscleText: String {
-        exercise.primaryMuscles.map { $0.displayName }.joined(separator: ", ")
     }
 }
 
 struct FilterChip: View {
     let title: String
+    let symbolName: String
     let isSelected: Bool
     let onTap: () -> Void
 
     var body: some View {
         Button(action: onTap) {
-            Text(title)
-                .font(.callout)
-                .foregroundColor(isSelected ? .white : .text)
-                .padding(.horizontal, Spacing.m)
-                .padding(.vertical, Spacing.s)
-                .background(isSelected ? Color.primary : Color.surface)
-                .cornerRadius(20)
+            HStack(spacing: 6) {
+                Image(systemName: symbolName)
+                    .font(.system(size: 10, weight: .semibold))
+                Text(title)
+                    .font(.callout)
+            }
+            .foregroundColor(isSelected ? .spaceNavy : .white)
+            .padding(.horizontal, Spacing.m)
+            .padding(.vertical, Spacing.s)
+            .background(isSelected ? Color.spaceGlow : Color.white.opacity(0.14))
+            .cornerRadius(20)
         }
     }
 }
