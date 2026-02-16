@@ -5,38 +5,40 @@ import UIKit
 
 extension Color {
 
-    static let appAccent = Color(hexString: "AEE7FF")
+    static let appAccent = Color(hexString: "86F3CB")
 
     static let black = Color(hexString: "000000")
-    static let gray900 = Color(hexString: "1A1A1A")
-    static let gray700 = Color(hexString: "525252")
-    static let gray400 = Color(hexString: "A3A3A3")
-    static let gray100 = Color(hexString: "F5F5F5")
+    static let gray900 = Color(hexString: "0D1220")
+    static let gray700 = Color(hexString: "52617D")
+    static let gray400 = Color(hexString: "9AAAC8")
+    static let gray100 = Color(hexString: "E8EEFA")
     static let white = Color(hexString: "FFFFFF")
-    static let spaceNavy = Color(hexString: "070B1F")
-    static let spaceMidnight = Color(hexString: "111936")
-    static let spaceNebula = Color(hexString: "1F2D5A")
-    static let themedCard = Color(hexString: "162345")
-    static let spaceStroke = Color(hexString: "33528A")
-    static let spaceGlow = Color(hexString: "8DD9FF")
-    static let chestColor = Color(hexString: "FF7A59")
-    static let backColor = Color(hexString: "50C4FF")
-    static let shoulderColor = Color(hexString: "FFD166")
-    static let legColor = Color(hexString: "7BD88F")
-    static let armColor = Color(hexString: "FFB3C6")
-    static let coreColor = Color(hexString: "B0B8FF")
+    static let spaceAbyss = Color(hexString: "030711")
+    static let spaceNavy = Color(hexString: "061024")
+    static let spaceMidnight = Color(hexString: "0C1B36")
+    static let spaceNebula = Color(hexString: "12324A")
+    static let themedCard = Color(hexString: "111E38")
+    static let spaceStroke = Color(hexString: "2D4B75")
+    static let spaceGlow = Color(hexString: "86F3CB")
+    static let spaceGlowSecondary = Color(hexString: "69C8FF")
+    static let chestColor = Color(hexString: "FF8F6A")
+    static let backColor = Color(hexString: "5CD3FF")
+    static let shoulderColor = Color(hexString: "FFD37A")
+    static let legColor = Color(hexString: "83E2A4")
+    static let armColor = Color(hexString: "FFBCD0")
+    static let coreColor = Color(hexString: "9CC8FF")
 
     static let text = white
-    static let textSecondary = gray400
-    static let textTertiary = gray400
-    static let background = spaceNavy
+    static let textSecondary = Color(hexString: "B7C6E4")
+    static let textTertiary = Color(hexString: "93A5C8")
+    static let background = spaceAbyss
     static let surface = themedCard
 
     static let ink = white
-    static let ash = gray400
-    static let graphite = gray400
+    static let ash = textSecondary
+    static let graphite = textTertiary
     static let ghost = themedCard
-    static let paper = spaceNavy
+    static let paper = background
     static let separator = Color(hexString: "E5E5E7")
 
     init(hexString: String) {
@@ -168,22 +170,22 @@ extension DayType {
 
 extension Font {
 
-    static let display = Font.system(size: 56, weight: .black, design: .default)
-    static let title = Font.system(size: 32, weight: .bold, design: .default)
-    static let body = Font.system(size: 17, weight: .medium, design: .default)
-    static let detail = Font.system(size: 15, weight: .regular, design: .default)
-    static let label = Font.system(size: 13, weight: .semibold, design: .default)
+    static let display = Font.system(size: 56, weight: .heavy, design: .rounded)
+    static let title = Font.system(size: 32, weight: .bold, design: .rounded)
+    static let body = Font.system(size: 17, weight: .semibold, design: .rounded)
+    static let detail = Font.system(size: 15, weight: .medium, design: .rounded)
+    static let label = Font.system(size: 13, weight: .semibold, design: .rounded)
 
     static let micro = label
     static let caption = label
     static let mega = display
 
     static func display(_ size: CGFloat) -> Font {
-        Font.system(size: size, weight: .black, design: .default)
+        Font.system(size: size, weight: .heavy, design: .rounded)
     }
 
     static func title(_ size: CGFloat) -> Font {
-        Font.system(size: size, weight: .bold, design: .default)
+        Font.system(size: size, weight: .bold, design: .rounded)
     }
 }
 
@@ -206,9 +208,9 @@ enum Spacing {
 }
 
 enum Motion {
-    static let quick = Animation.easeOut(duration: 0.2)
-    static let normal = Animation.easeOut(duration: 0.3)
-    static let slow = Animation.spring(response: 0.5, dampingFraction: 0.7)
+    static let quick = Animation.easeOut(duration: 0.18)
+    static let normal = Animation.spring(response: 0.28, dampingFraction: 0.86)
+    static let slow = Animation.spring(response: 0.52, dampingFraction: 0.82)
 
     static let snap = normal
     static let slide = slow
@@ -243,8 +245,19 @@ struct PrimaryButtonStyle: ButtonStyle {
             .foregroundColor(.spaceNavy)
             .frame(maxWidth: .infinity)
             .padding(.vertical, Space.m)
-            .background(Color.spaceGlow)
+            .background(
+                LinearGradient(
+                    colors: [.spaceGlow, .spaceGlowSecondary],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
             .cornerRadius(16)
+            .overlay(
+                RoundedRectangle(cornerRadius: 16)
+                    .stroke(Color.white.opacity(0.28), lineWidth: 0.9)
+            )
+            .shadow(color: .spaceGlow.opacity(0.28), radius: 12, y: 6)
             .scaleEffect(configuration.isPressed ? 0.98 : 1.0)
             .animation(Motion.quick, value: configuration.isPressed)
     }
@@ -254,13 +267,32 @@ struct CardStyle: ViewModifier {
     func body(content: Content) -> some View {
         content
             .padding(Space.l)
-            .background(Color.themedCard.opacity(0.88))
+            .background(
+                LinearGradient(
+                    colors: [
+                        Color.themedCard.opacity(0.95),
+                        Color.spaceMidnight.opacity(0.86)
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
             .cornerRadius(20)
             .overlay(
                 RoundedRectangle(cornerRadius: 20)
-                    .stroke(Color.spaceStroke.opacity(0.6), lineWidth: 1)
+                    .stroke(
+                        LinearGradient(
+                            colors: [
+                                Color.spaceGlow.opacity(0.35),
+                                Color.spaceStroke.opacity(0.55)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 1
+                    )
             )
-            .shadow(color: .black.opacity(0.45), radius: 12, y: 8)
+            .shadow(color: .black.opacity(0.52), radius: 16, y: 10)
     }
 }
 
@@ -273,7 +305,7 @@ struct ScaleButtonStyle: ButtonStyle {
 }
 
 struct StarfieldBackground: View {
-    private let starCount = 70
+    private let starCount = 76
 
     var body: some View {
         GeometryReader { geo in
@@ -283,20 +315,25 @@ struct StarfieldBackground: View {
 
                 ZStack {
                     LinearGradient(
-                        colors: [.spaceNavy, .spaceMidnight, .spaceNavy],
+                        colors: [.spaceAbyss, .spaceNavy, .spaceMidnight],
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
                     )
                     Circle()
-                        .fill(Color.spaceNebula.opacity(0.25))
+                        .fill(Color.spaceNebula.opacity(0.33))
                         .frame(width: renderSize.width * 0.95)
-                        .blur(radius: 60)
+                        .blur(radius: 66)
                         .offset(x: -renderSize.width * 0.35, y: -renderSize.height * 0.35)
                     Circle()
-                        .fill(Color.spaceGlow.opacity(0.12))
+                        .fill(Color.spaceGlowSecondary.opacity(0.14))
                         .frame(width: renderSize.width * 0.75)
-                        .blur(radius: 70)
+                        .blur(radius: 74)
                         .offset(x: renderSize.width * 0.32, y: renderSize.height * 0.42)
+                    Circle()
+                        .fill(Color.spaceGlow.opacity(0.08))
+                        .frame(width: renderSize.width * 0.62)
+                        .blur(radius: 84)
+                        .offset(x: renderSize.width * 0.22, y: -renderSize.height * 0.2)
                     ForEach(0..<starCount, id: \.self) { index in
                         Circle()
                             .fill(Color.white.opacity(animatedStarOpacity(for: index, time: time)))
@@ -313,12 +350,7 @@ struct StarfieldBackground: View {
     }
 
     private func stabilizedRenderSize(for current: CGSize) -> CGSize {
-#if canImport(UIKit)
-        let screen = UIScreen.main.bounds.size
-        return CGSize(width: max(current.width, screen.width), height: max(current.height, screen.height))
-#else
-        return current
-#endif
+        CGSize(width: max(current.width, 1), height: max(current.height, 1))
     }
 
     private func starX(for index: Int, width: CGFloat) -> CGFloat {
@@ -340,21 +372,21 @@ struct StarfieldBackground: View {
     private func animatedStarX(for index: Int, width: CGFloat, time: TimeInterval) -> CGFloat {
         let base = starX(for: index, width: width)
         let phase = Double(index) * 0.37
-        let drift = CGFloat(sin(time * (0.32 + Double(index % 5) * 0.03) + phase) * 7.5)
+        let drift = CGFloat(sin(time * (0.24 + Double(index % 5) * 0.024) + phase) * 5.8)
         return base + drift
     }
 
     private func animatedStarY(for index: Int, height: CGFloat, time: TimeInterval) -> CGFloat {
         let base = starY(for: index, height: height)
         let phase = Double(index) * 0.51
-        let drift = CGFloat(cos(time * (0.28 + Double(index % 7) * 0.026) + phase) * 5.8)
+        let drift = CGFloat(cos(time * (0.21 + Double(index % 7) * 0.02) + phase) * 4.4)
         return base + drift
     }
 
     private func animatedStarOpacity(for index: Int, time: TimeInterval) -> Double {
         let base = starOpacity(for: index)
-        let twinkle = 0.16 * sin(time * (1.1 + Double(index % 9) * 0.08) + Double(index))
-        return min(max(base + twinkle, 0.15), 1.0)
+        let twinkle = 0.12 * sin(time * (0.95 + Double(index % 9) * 0.06) + Double(index))
+        return min(max(base + twinkle, 0.15), 0.95)
     }
 }
 
@@ -524,12 +556,31 @@ struct MuscleTargetRow: View {
 extension View {
     func themedCard(cornerRadius: CGFloat = 16) -> some View {
         self
-            .background(Color.themedCard.opacity(0.88))
+            .background(
+                LinearGradient(
+                    colors: [
+                        Color.themedCard.opacity(0.95),
+                        Color.spaceMidnight.opacity(0.86)
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
             .cornerRadius(cornerRadius)
             .overlay(
                 RoundedRectangle(cornerRadius: cornerRadius)
-                    .stroke(Color.spaceStroke.opacity(0.6), lineWidth: 1)
+                    .stroke(
+                        LinearGradient(
+                            colors: [
+                                Color.spaceGlow.opacity(0.35),
+                                Color.spaceStroke.opacity(0.55)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        ),
+                        lineWidth: 1
+                    )
             )
-            .shadow(color: .black.opacity(0.45), radius: 12, y: 8)
+            .shadow(color: .black.opacity(0.52), radius: 14, y: 9)
     }
 }

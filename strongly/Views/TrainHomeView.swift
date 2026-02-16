@@ -7,10 +7,11 @@ struct TrainHomeView: View {
     @AppStorage("preferred_workout_duration_user_override") private var durationUserOverride = false
     @State private var isGenerating = false
     @State private var generatedExercises: [ExerciseLog] = []
+    @State private var generatedTargets: [MuscleGroup: Double] = [:]
     @State private var showWorkout = false
-    @State private var showAllTargets = false
     @State private var draftName = ""
     @State private var showNameCapture = false
+    @State private var autoDurationNote: String?
     @EnvironmentObject private var planStore: SplitPlanStore
 
     var body: some View {
@@ -27,7 +28,8 @@ struct TrainHomeView: View {
             WorkoutFlowView(
                 initialSession: nil,
                 repository: FileSystemWorkoutRepository(),
-                preloadedExercises: generatedExercises
+                preloadedExercises: generatedExercises,
+                targetOverrides: generatedTargets
             )
         }
         .sheet(isPresented: $showNameCapture) {
@@ -116,134 +118,236 @@ struct TrainHomeView: View {
 
     private var planCard: some View {
         let day = planStore.dayConfig()
-        let targets = planStore.targetsForDate()
+        let rawTargets = planStore.targetsForDate()
         let orderedGroups = orderedTrainingGroups(for: day)
-        let visibleGroups = showAllTargets ? orderedGroups : Array(orderedGroups.prefix(8))
-        let recommendedDuration = recommendedWorkoutDurationMinutes(for: day)
+        let recommendedDuration = recommendedWorkoutDurationMinutes(for: day, targets: rawTargets)
+        let previewTargets = previewSessionTargets(
+            for: day,
+            rawTargets: rawTargets,
+            durationMinutes: preferredDuration
+        )
+        let displayGroups = orderedGroups.filter { targetSets(for: $0, in: previewTargets) > 0 }
 
         return VStack(alignment: .leading, spacing: 16) {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 4) {
-                    DayTypeBadge(dayType: day.dayType)
-                    Text(day.isRest ? "Rest Day" : "Today's Workout")
-                        .font(.system(size: 17, weight: .bold))
-                        .foregroundColor(.white)
-                    Text(day.isRest ? "Recover today and keep your weekly rhythm." : "Focused and ready to train.")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundColor(.white.opacity(0.62))
-                }
+            trainCardHeader(day: day)
 
-                Spacer()
-            }
-
-            if planStore.canUndoRestShift() {
-                Button {
-                    withAnimation(Motion.quick) {
-                        planStore.undoLastRestShift()
-                        showAllTargets = false
-                    }
-                } label: {
-                    Text("Undo Skip Rest")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundColor(.white.opacity(0.9))
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 7)
-                        .background(Color.white.opacity(0.14))
-                        .cornerRadius(10)
-                }
-                .frame(maxWidth: .infinity, alignment: .trailing)
-            }
-
-            if !day.isRest {
-                durationCard(recommendedDuration: recommendedDuration)
-            }
-
-            if targets.isEmpty {
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack(spacing: 10) {
-                        Image(systemName: "bed.double.fill")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundColor(.spaceGlow)
-                            .frame(width: 26, height: 26)
-                            .background(Color.white.opacity(0.14))
-                            .clipShape(Circle())
-
-                        Text("No workout required today")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundColor(.white.opacity(0.88))
-                    }
-
-                    Text("Take a true rest day or shift this rest to your next training day.")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundColor(.white.opacity(0.66))
-
-                    HStack(spacing: 8) {
-                        recoveryChip(systemName: "moon.stars.fill", label: "Sleep")
-                        recoveryChip(systemName: "figure.walk", label: "Walk")
-                        recoveryChip(systemName: "drop.fill", label: "Hydrate")
-                    }
-
-                    HStack(spacing: 10) {
-                        Button {
-                            withAnimation(Motion.quick) {
-                                _ = planStore.skipRestTodayAndShiftCycle()
-                                showAllTargets = false
-                            }
-                        } label: {
-                            Text("Train Today")
-                                .font(.system(size: 13, weight: .semibold))
-                                .foregroundColor(.spaceNavy)
-                                .padding(.horizontal, 14)
-                                .padding(.vertical, 8)
-                                .background(Color.spaceGlow)
-                                .cornerRadius(10)
-                        }
-                        .disabled(!planStore.canSkipRestToday())
-                        .opacity(planStore.canSkipRestToday() ? 1 : 0.5)
-                    }
-                }
+            if day.isRest || previewTargets.isEmpty {
+                restDayBody()
             } else {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Today's Focus")
-                        .font(.system(size: 13, weight: .bold))
-                        .foregroundColor(.white.opacity(0.7))
-
-                    LazyVGrid(
-                        columns: [
-                            GridItem(.flexible(minimum: 120), spacing: 10),
-                            GridItem(.flexible(minimum: 120), spacing: 10)
-                        ],
-                        spacing: 10
-                    ) {
-                        ForEach(visibleGroups, id: \.self) { group in
-                            targetTile(group: group)
-                        }
-                    }
-
-                    if orderedGroups.count > 6 {
-                        Button(showAllTargets ? "Show less" : "Show all \(orderedGroups.count)") {
-                            withAnimation(Motion.quick) {
-                                showAllTargets.toggle()
-                            }
-                        }
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundColor(.spaceGlow)
-                        .frame(maxWidth: .infinity, alignment: .center)
-                        .padding(.top, 4)
-                    }
-                }
+                trainingDayBody(
+                    day: day,
+                    targets: previewTargets,
+                    groups: displayGroups,
+                    selectedDuration: preferredDuration,
+                    recommendedDuration: recommendedDuration
+                )
             }
-
-            Button("Edit plan in Plan tab") {
-                tabSelection = 1
-            }
-            .font(.system(size: 13, weight: .semibold))
-            .foregroundColor(.white.opacity(0.72))
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(18)
-        .frame(maxWidth: .infinity, minHeight: day.isRest ? 320 : 420, alignment: .topLeading)
+        .frame(maxWidth: .infinity, minHeight: day.isRest ? 280 : 360, alignment: .topLeading)
         .themedCard(cornerRadius: 22)
+    }
+
+    private func trainCardHeader(day: SplitDayConfig) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                DayTypeBadge(dayType: day.dayType)
+                Text(day.isRest ? "Rest Day" : "\(day.dayType.rawValue) Day")
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundColor(.white)
+            }
+
+            Spacer()
+
+            changeTodayMenu
+        }
+    }
+
+    private var changeTodayMenu: some View {
+        Menu {
+            if planStore.hasAgendaOverrideForToday() {
+                Button("Back to Plan") {
+                    withAnimation(Motion.quick) {
+                        planStore.resetAgendaForTodayToPlan()
+                        applyRecommendedDurationIfNeeded()
+                    }
+                }
+            }
+
+            Button("Rest") {
+                withAnimation(Motion.quick) {
+                    planStore.setAgendaForToday(.rest)
+                }
+            }
+
+            Divider()
+
+            Button("Push") {
+                withAnimation(Motion.quick) {
+                    planStore.setAgendaForToday(.push)
+                    applyRecommendedDurationIfNeeded()
+                }
+            }
+            Button("Pull") {
+                withAnimation(Motion.quick) {
+                    planStore.setAgendaForToday(.pull)
+                    applyRecommendedDurationIfNeeded()
+                }
+            }
+            Button("Legs") {
+                withAnimation(Motion.quick) {
+                    planStore.setAgendaForToday(.legs)
+                    applyRecommendedDurationIfNeeded()
+                }
+            }
+            Button("Upper") {
+                withAnimation(Motion.quick) {
+                    planStore.setAgendaForToday(.upper)
+                    applyRecommendedDurationIfNeeded()
+                }
+            }
+            Button("Lower") {
+                withAnimation(Motion.quick) {
+                    planStore.setAgendaForToday(.lower)
+                    applyRecommendedDurationIfNeeded()
+                }
+            }
+            Button("Full Body") {
+                withAnimation(Motion.quick) {
+                    planStore.setAgendaForToday(.full)
+                    applyRecommendedDurationIfNeeded()
+                }
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "slider.horizontal.3")
+                    .font(.system(size: 11, weight: .bold))
+                Text("Change Today")
+                    .font(.system(size: 11, weight: .semibold))
+            }
+            .foregroundColor(.white.opacity(0.9))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(Color.white.opacity(0.12))
+            .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func trainingDayBody(
+        day: SplitDayConfig,
+        targets: [MuscleGroup: Double],
+        groups: [MuscleTrainingGroup],
+        selectedDuration: Int,
+        recommendedDuration: Int
+    ) -> some View {
+        let plannedWorkSets = estimatedWorkoutSetCount(
+            for: day,
+            durationMinutes: selectedDuration
+        )
+        let weeklyProgress = weeklyProgress(for: targets)
+
+        return VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 6) {
+                Text("\(selectedDuration)m today")
+                Text("•")
+                Text("\(plannedWorkSets) work sets")
+            }
+            .font(.system(size: 14, weight: .semibold))
+            .foregroundColor(.white.opacity(0.78))
+
+            VStack(alignment: .leading, spacing: 9) {
+                Text("Today's Focus")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundColor(.white.opacity(0.7))
+
+                LazyVGrid(
+                    columns: [
+                        GridItem(.flexible(minimum: 120), spacing: 10),
+                        GridItem(.flexible(minimum: 120), spacing: 10)
+                    ],
+                    spacing: 10
+                ) {
+                    ForEach(groups, id: \.self) { group in
+                        focusTargetTile(
+                            group: group,
+                            targetSets: targetSets(for: group, in: targets)
+                        )
+                    }
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("Weekly Pace")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundColor(.white.opacity(0.7))
+                    Spacer()
+                    Text("\(formatSets(weeklyProgress.completed)) / \(formatSets(weeklyProgress.target))")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.75))
+                }
+
+                GeometryReader { geo in
+                    Capsule()
+                        .fill(Color.white.opacity(0.14))
+                        .frame(height: 8)
+                        .overlay(alignment: .leading) {
+                            Capsule()
+                                .fill(Color.spaceGlow)
+                                .frame(width: max(8, geo.size.width * weeklyProgress.ratio), height: 8)
+                        }
+                }
+                .frame(height: 8)
+            }
+
+            durationCard(recommendedDuration: recommendedDuration)
+        }
+    }
+
+    private func restDayBody() -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Recover today and come back stronger.")
+                .font(.system(size: 14, weight: .medium))
+                .foregroundColor(.white.opacity(0.78))
+
+            Text(nextTrainingCopy())
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(.spaceGlow)
+
+            HStack(spacing: 8) {
+                recoveryChip(systemName: "moon.stars.fill", label: "Sleep")
+                recoveryChip(systemName: "figure.walk", label: "Walk")
+                recoveryChip(systemName: "figure.flexibility", label: "Mobility")
+                recoveryChip(systemName: "drop.fill", label: "Hydrate")
+            }
+
+            HStack(spacing: 10) {
+                Text("Keep Rest")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.8))
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .background(Color.white.opacity(0.12))
+                    .cornerRadius(10)
+
+                Button {
+                    withAnimation(Motion.quick) {
+                        _ = planStore.skipRestTodayAndShiftCycle()
+                    }
+                } label: {
+                    Text("Train Today")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(.spaceNavy)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 8)
+                        .background(Color.spaceGlow)
+                        .cornerRadius(10)
+                }
+                .disabled(!planStore.canSkipRestToday())
+                .opacity(planStore.canSkipRestToday() ? 1 : 0.5)
+            }
+        }
     }
 
     private func durationCard(recommendedDuration: Int) -> some View {
@@ -265,6 +369,7 @@ struct TrainHomeView: View {
                 Button {
                     durationUserOverride = true
                     preferredDuration = max(15, preferredDuration - 5)
+                    autoDurationNote = nil
                 } label: {
                     Image(systemName: "minus")
                         .font(.system(size: 13, weight: .bold))
@@ -283,6 +388,7 @@ struct TrainHomeView: View {
                 Button {
                     durationUserOverride = true
                     preferredDuration = min(120, preferredDuration + 5)
+                    autoDurationNote = nil
                 } label: {
                     Image(systemName: "plus")
                         .font(.system(size: 13, weight: .bold))
@@ -297,6 +403,7 @@ struct TrainHomeView: View {
                 Button {
                     withAnimation(Motion.quick) {
                         durationUserOverride = false
+                        autoDurationNote = nil
                         applyRecommendedDurationIfNeeded()
                     }
                 } label: {
@@ -314,6 +421,12 @@ struct TrainHomeView: View {
                 }
                 .buttonStyle(.plain)
             }
+
+            if let note = durationRecommendationText(recommendedDuration: recommendedDuration) {
+                Text(note)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.68))
+            }
         }
         .padding(12)
         .background(Color.white.opacity(0.06))
@@ -324,7 +437,7 @@ struct TrainHomeView: View {
         )
     }
 
-    private func targetTile(group: MuscleTrainingGroup) -> some View {
+    private func focusTargetTile(group: MuscleTrainingGroup, targetSets: Double) -> some View {
         HStack(spacing: 8) {
             ZStack {
                 Circle()
@@ -343,7 +456,13 @@ struct TrainHomeView: View {
             Text(group.displayName)
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundColor(.white.opacity(0.9))
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .lineLimit(1)
+
+            Spacer(minLength: 4)
+
+            Text(formatSets(targetSets))
+                .font(.system(size: 12, weight: .bold))
+                .foregroundColor(.spaceGlow)
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 8)
@@ -353,6 +472,60 @@ struct TrainHomeView: View {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
                 .stroke(Color.white.opacity(0.1), lineWidth: 1)
         )
+    }
+
+    private func targetSets(for group: MuscleTrainingGroup, in targets: [MuscleGroup: Double]) -> Double {
+        targets.reduce(0) { partial, entry in
+            partial + (entry.key.trainingGroup == group ? entry.value : 0)
+        }
+    }
+
+    private func weeklyProgress(for targets: [MuscleGroup: Double]) -> (completed: Double, target: Double, ratio: CGFloat) {
+        let targetTotal = targets.keys.reduce(0.0) { partial, muscle in
+            partial + (planStore.plan.weeklyTargets[muscle] ?? TrainingTargets.advancedWeeklySets)
+        }
+        let completedTotal = targets.keys.reduce(0.0) { partial, muscle in
+            partial + (planStore.weeklyCompletedSets[muscle] ?? 0)
+        }
+        let ratio: CGFloat
+        if targetTotal > 0 {
+            ratio = CGFloat(min(max(completedTotal / targetTotal, 0), 1))
+        } else {
+            ratio = 0
+        }
+        return (completedTotal, targetTotal, ratio)
+    }
+
+    private func nextTrainingCopy() -> String {
+        let calendar = Calendar.current
+        let today = Date()
+
+        for offset in 1...7 {
+            guard let date = calendar.date(byAdding: .day, value: offset, to: today) else { continue }
+            let day = planStore.dayConfig(for: date)
+            guard !day.isRest else { continue }
+
+            if offset == 1 {
+                return "Next: \(day.dayType.rawValue) tomorrow."
+            }
+            return "Next: \(day.dayType.rawValue) in \(offset) days."
+        }
+
+        return "Next training day is open."
+    }
+
+    private func estimatedWorkoutSetCount(
+        for day: SplitDayConfig,
+        durationMinutes: Int
+    ) -> Int {
+        guard !day.isRest else { return 0 }
+
+        let warmup = day.dayType == .legs || day.dayType == .lower ? 8.0 : 6.0
+        let activeMinutes = max(0, Double(durationMinutes) - warmup)
+        let minutesPerSet = max(estimatedMinutesPerSet(for: day.dayType), 1.8)
+        let capacityByTime = Int(floor(activeMinutes / minutesPerSet))
+        let minimumUsefulSets = max(day.resolvedMuscles().count, 6)
+        return max(minimumUsefulSets, capacityByTime)
     }
 
     private var generatingView: some View {
@@ -372,55 +545,52 @@ struct TrainHomeView: View {
 
         let generator = WorkoutGenerator.shared
         let today = Date()
-        let muscles = plannedMuscles(for: today)
-        let perSessionTargets = plannedTargets(for: today)
+        let todayDay = planStore.dayConfig(for: today)
+        let rawTargets = plannedTargets(for: today)
+        let muscles = rawTargets.filter { $0.value > 0 }.map(\.key)
         let focus = automaticFocus(for: today)
         let equipment = automaticEquipment(for: today)
 
-        var duration = preferredDuration
-        var bestExercises: [ExerciseLog] = []
-        var bestCoverage = -1.0
-        var bestDuration = duration
+        let duration = max(15, preferredDuration)
+        let sessionTargets = previewSessionTargets(
+            for: todayDay,
+            rawTargets: rawTargets,
+            durationMinutes: duration
+        )
+        let plannedWorkSets = estimatedWorkoutSetCount(
+            for: todayDay,
+            durationMinutes: duration
+        )
+        let request = WorkoutRequest(
+            duration: duration,
+            targetMuscles: muscles,
+            equipment: equipment,
+            focus: focus,
+            preferredExercises: []
+        )
+        let workout = await generator.generateIntelligentWorkout(request: request)
 
-        for _ in 0..<8 {
-            let request = WorkoutRequest(
-                duration: duration,
-                targetMuscles: muscles,
-                equipment: equipment,
-                focus: focus,
-                preferredExercises: []
-            )
-            let workout = await generator.generateIntelligentWorkout(request: request)
-            if workout.exercises.isEmpty {
-                break
-            }
-
-            let maxTotalSets = max(workout.exercises.count, Int(round(Double(duration) / 2.5)))
-            let allocation = allocateSetsForTargets(
-                exercises: workout.exercises,
-                targets: perSessionTargets,
-                maxTotalSets: maxTotalSets
-            )
-
-            let isBetterCoverage = allocation.coverage > bestCoverage + 0.01
-            let isTieAndShorter = abs(allocation.coverage - bestCoverage) <= 0.01 && duration < bestDuration
-            if isBetterCoverage || isTieAndShorter {
-                bestCoverage = allocation.coverage
-                bestExercises = allocation.exercises
-                bestDuration = duration
-            }
-
-            if allocation.coverage >= 0.98 {
-                break
-            }
-
-            if duration >= 120 {
-                break
-            }
-            duration = min(120, duration + 10)
+        if workout.exercises.isEmpty {
+            generatedExercises = []
+            generatedTargets = sessionTargets
+            isGenerating = false
+            return
         }
 
-        generatedExercises = bestExercises
+        let allocation = allocateSetsForTargets(
+            exercises: workout.exercises,
+            targets: sessionTargets,
+            minTotalSets: plannedWorkSets,
+            maxTotalSets: plannedWorkSets
+        )
+
+        generatedExercises = allocation.exercises
+        generatedTargets = sessionTargets
+        autoDurationNote = buildAutoDurationNote(
+            rawTargets: rawTargets,
+            sessionTargets: sessionTargets,
+            duration: duration
+        )
 
         for i in 0..<3 {
             DispatchQueue.main.asyncAfter(deadline: .now() + Double(i) * 0.1) {
@@ -432,15 +602,6 @@ struct TrainHomeView: View {
             isGenerating = false
             showWorkout = true
         }
-    }
-
-    private func plannedMuscles(for date: Date) -> [MuscleGroup] {
-        let day = planStore.dayConfig(for: date)
-        let muscles = day.resolvedMuscles()
-        if muscles.isEmpty {
-            return recoveryMuscles()
-        }
-        return muscles
     }
 
     private func plannedTargets(for date: Date) -> [MuscleGroup: Double] {
@@ -468,10 +629,6 @@ struct TrainHomeView: View {
         .clipShape(Capsule())
     }
 
-    private func recoveryMuscles() -> [MuscleGroup] {
-        [.abs, .glutes, .hamstrings, .shoulderRear, .backThickness]
-    }
-
     private func greetingTitle() -> String {
         let clean = userName.trimmingCharacters(in: .whitespacesAndNewlines)
         if clean.isEmpty {
@@ -481,47 +638,128 @@ struct TrainHomeView: View {
         return "Hi, \(first)"
     }
 
-    private func recommendedWorkoutDurationMinutes(for day: SplitDayConfig) -> Int {
+    private func recommendedWorkoutDurationMinutes(
+        for day: SplitDayConfig,
+        targets: [MuscleGroup: Double]
+    ) -> Int {
         if day.isRest {
             return 0
         }
 
-        let base: Int
-        switch day.dayType {
-        case .push, .pull:
-            base = 45
-        case .legs, .lower:
-            base = 50
-        case .upper:
-            base = 50
-        case .full:
-            base = 55
-        case .rest:
-            base = 0
-        }
-
-        let dayAdjustment: Int
-        switch planStore.plan.trainingDays {
-        case 4:
-            dayAdjustment = 10
-        case 5:
-            dayAdjustment = 5
-        default:
-            dayAdjustment = 0
-        }
-
-        let muscleCount = day.resolvedMuscles().count
-        let extra = max(0, muscleCount - 4) * 2
-        let raw = min(75, max(30, base + dayAdjustment + extra))
-        let rounded = Int((Double(raw) / 5.0).rounded() * 5.0)
-        return min(75, max(30, rounded))
+        let targetCredit = targets.values.reduce(0, +)
+        let creditPerSet = estimatedCreditPerSet(for: day.dayType)
+        let setsNeeded = max(Double(day.resolvedMuscles().count), targetCredit / max(creditPerSet, 0.75))
+        let warmup = day.dayType == .legs || day.dayType == .lower ? 8.0 : 6.0
+        let minutesPerSet = estimatedMinutesPerSet(for: day.dayType)
+        let rawMinutes = Int((warmup + (setsNeeded * minutesPerSet)).rounded())
+        let clamped = min(60, max(45, rawMinutes))
+        let rounded = Int((Double(clamped) / 5.0).rounded() * 5.0)
+        return min(60, max(45, rounded))
     }
 
     private func applyRecommendedDurationIfNeeded() {
         let day = planStore.dayConfig()
         guard !day.isRest else { return }
         guard !durationUserOverride else { return }
-        preferredDuration = recommendedWorkoutDurationMinutes(for: day)
+        preferredDuration = recommendedWorkoutDurationMinutes(
+            for: day,
+            targets: plannedTargets(for: Date())
+        )
+    }
+
+    private func previewSessionTargets(
+        for day: SplitDayConfig,
+        rawTargets: [MuscleGroup: Double],
+        durationMinutes: Int
+    ) -> [MuscleGroup: Double] {
+        guard !day.isRest else { return [:] }
+        guard !rawTargets.isEmpty else { return [:] }
+
+        let warmup = day.dayType == .legs || day.dayType == .lower ? 8.0 : 6.0
+        let activeMinutes = max(0, Double(durationMinutes) - warmup)
+        let minutesPerSet = max(estimatedMinutesPerSet(for: day.dayType), 1.8)
+        let capacityByTime = Int(floor(activeMinutes / minutesPerSet))
+        let minimumUsefulSets = max(day.resolvedMuscles().count, 6)
+        let setCapacity = max(minimumUsefulSets, capacityByTime)
+
+        let targetCredit = rawTargets.values.reduce(0, +)
+        guard targetCredit > 0 else { return rawTargets }
+
+        let creditPerSet = estimatedCreditPerSet(for: day.dayType)
+        let achievableCredit = Double(setCapacity) * max(creditPerSet, 0.8)
+        guard achievableCredit + 0.01 < targetCredit else {
+            return rawTargets.filter { $0.value > 0 }
+        }
+
+        let scale = max(0.35, achievableCredit / targetCredit)
+        return scaledTargets(rawTargets, scale: scale)
+    }
+
+    private func scaledTargets(
+        _ rawTargets: [MuscleGroup: Double],
+        scale: Double
+    ) -> [MuscleGroup: Double] {
+        guard scale < 0.999 else {
+            return rawTargets.filter { $0.value > 0 }
+        }
+
+        var scaled: [MuscleGroup: Double] = [:]
+        for (muscle, target) in rawTargets where target > 0 {
+            let rawValue = target * scale
+            let roundedHalfStep = (rawValue * 2).rounded() / 2
+            let minimum: Double = (target >= 2 && scale >= 0.4) ? 0.5 : 0
+            let value = max(minimum, roundedHalfStep)
+            if value > 0 {
+                scaled[muscle] = value
+            }
+        }
+        return scaled
+    }
+
+    private func buildAutoDurationNote(
+        rawTargets: [MuscleGroup: Double],
+        sessionTargets: [MuscleGroup: Double],
+        duration: Int
+    ) -> String {
+        let rawTotal = rawTargets.values.reduce(0, +)
+        let sessionTotal = sessionTargets.values.reduce(0, +)
+        if sessionTotal + 0.5 < rawTotal {
+            return "Auto balanced today to \(formatSets(sessionTotal)) focus sets in \(duration)m."
+        }
+        return "Today fits your weekly pace in \(duration)m."
+    }
+
+    private func durationRecommendationText(recommendedDuration: Int) -> String? {
+        if durationUserOverride, recommendedDuration != preferredDuration {
+            return "Auto suggests \(recommendedDuration)m to stay on weekly pace."
+        }
+        return autoDurationNote
+    }
+
+    private func estimatedMinutesPerSet(for dayType: DayType) -> Double {
+        switch dayType {
+        case .legs, .lower:
+            return 2.9
+        case .full:
+            return 2.8
+        case .push, .pull, .upper:
+            return 2.7
+        case .rest:
+            return 0
+        }
+    }
+
+    private func estimatedCreditPerSet(for dayType: DayType) -> Double {
+        switch dayType {
+        case .legs, .lower:
+            return 1.1
+        case .full:
+            return 1.4
+        case .push, .pull, .upper:
+            return 1.3
+        case .rest:
+            return 1.0
+        }
     }
 
     private func orderedTrainingGroups(for day: SplitDayConfig) -> [MuscleTrainingGroup] {
@@ -605,6 +843,7 @@ struct TrainHomeView: View {
     private func allocateSetsForTargets(
         exercises: [ExerciseLog],
         targets: [MuscleGroup: Double],
+        minTotalSets: Int,
         maxTotalSets: Int
     ) -> (exercises: [ExerciseLog], coverage: Double) {
         guard !exercises.isEmpty else { return ([], 0) }
@@ -634,6 +873,13 @@ struct TrainHomeView: View {
         }
 
         while totalSets < maxTotalSets {
+            if totalSets >= minTotalSets {
+                let currentCoverage = coverageScore(achieved: achieved, targets: targets)
+                if currentCoverage >= 0.98 {
+                    break
+                }
+            }
+
             var bestExerciseId: UUID?
             var bestScore = 0.0
 
@@ -656,11 +902,32 @@ struct TrainHomeView: View {
                 }
             }
 
-            guard let bestExerciseId, bestScore > 0 else { break }
-            setCounts[bestExerciseId, default: 0] += 1
+            if let bestExerciseId, bestScore > 0 {
+                setCounts[bestExerciseId, default: 0] += 1
+                totalSets += 1
+                applyContribution(
+                    for: bestExerciseId,
+                    into: &achieved,
+                    using: metadata
+                )
+                continue
+            }
+
+            guard totalSets < minTotalSets else { break }
+
+            guard let fallbackExerciseId = fallbackExerciseId(
+                selected: selected,
+                metadata: metadata,
+                setCounts: setCounts,
+                targets: targets
+            ) else {
+                break
+            }
+
+            setCounts[fallbackExerciseId, default: 0] += 1
             totalSets += 1
             applyContribution(
-                for: bestExerciseId,
+                for: fallbackExerciseId,
                 into: &achieved,
                 using: metadata
             )
@@ -686,6 +953,93 @@ struct TrainHomeView: View {
             }
         }
 
+        let coverage = coverageScore(achieved: achieved, targets: targets)
+
+        return (selected, coverage)
+    }
+
+    private func recommendedSetBudget(
+        exercises: [ExerciseLog],
+        targets: [MuscleGroup: Double],
+        durationMinutes: Int
+    ) -> (min: Int, max: Int) {
+        let exerciseCount = max(1, exercises.count)
+        let durationMaxSets = max(exerciseCount, Int(floor(Double(durationMinutes) / 3.0)))
+        let durationMinSets = max(exerciseCount, Int(floor(Double(durationMinutes) / 5.0)))
+
+        let totalTargetCredit = targets.values.reduce(0, +)
+        let averageTargetCreditPerSet = averageTargetCreditPerSet(
+            exercises: exercises,
+            targets: targets
+        )
+        let targetDrivenSets = Int(ceil(totalTargetCredit / max(averageTargetCreditPerSet, 0.6)))
+
+        let adaptiveMin = min(durationMaxSets, max(exerciseCount, min(durationMinSets, targetDrivenSets)))
+        let adaptiveMax = min(durationMaxSets, max(adaptiveMin, targetDrivenSets + 3))
+
+        return (adaptiveMin, adaptiveMax)
+    }
+
+    private func averageTargetCreditPerSet(
+        exercises: [ExerciseLog],
+        targets: [MuscleGroup: Double]
+    ) -> Double {
+        guard !exercises.isEmpty else { return 1.0 }
+        guard !targets.isEmpty else { return 1.0 }
+
+        let targetMuscles = Set(targets.keys)
+        var totalCredit = 0.0
+        var count = 0
+
+        for log in exercises {
+            guard let exercise = ExerciseDatabase.shared.getExercise(named: log.name) else { continue }
+            var credit = 0.0
+            for muscle in exercise.primaryMuscles where targetMuscles.contains(muscle) {
+                credit += 1.0
+            }
+            for muscle in exercise.secondaryMuscles where targetMuscles.contains(muscle) {
+                credit += TrainingTargets.secondaryMuscleCredit
+            }
+            if credit > 0 {
+                totalCredit += credit
+                count += 1
+            }
+        }
+
+        guard count > 0 else { return 1.0 }
+        return totalCredit / Double(count)
+    }
+
+    private func fallbackExerciseId(
+        selected: [ExerciseLog],
+        metadata: [UUID: Exercise],
+        setCounts: [UUID: Int],
+        targets: [MuscleGroup: Double]
+    ) -> UUID? {
+        let targetMuscles = Set(targets.keys)
+        let candidates = selected.compactMap { log -> (UUID, Double)? in
+            guard let exercise = metadata[log.id] else { return nil }
+            let currentSets = setCounts[log.id] ?? 0
+            guard currentSets < maxSetsPerExercise(for: exercise) else { return nil }
+
+            let primaryHits = exercise.primaryMuscles.filter { targetMuscles.contains($0) }.count
+            let secondaryHits = exercise.secondaryMuscles.filter { targetMuscles.contains($0) }.count
+            let relevance = Double(primaryHits) + (Double(secondaryHits) * TrainingTargets.secondaryMuscleCredit)
+            guard relevance > 0 else { return nil }
+
+            let compoundBonus = exercise.isCompound ? 0.4 : 0
+            let fatiguePenalty = Double(currentSets) * 0.25
+            let score = relevance + compoundBonus - fatiguePenalty
+            return (log.id, score)
+        }
+
+        return candidates.max(by: { $0.1 < $1.1 })?.0
+    }
+
+    private func coverageScore(
+        achieved: [MuscleGroup: Double],
+        targets: [MuscleGroup: Double]
+    ) -> Double {
         var ratioSum = 0.0
         var ratioCount = 0
         for (muscle, target) in targets {
@@ -693,9 +1047,7 @@ struct TrainHomeView: View {
             ratioSum += min((achieved[muscle] ?? 0) / target, 1.0)
             ratioCount += 1
         }
-        let coverage = ratioCount > 0 ? ratioSum / Double(ratioCount) : 1.0
-
-        return (selected, coverage)
+        return ratioCount > 0 ? ratioSum / Double(ratioCount) : 1.0
     }
 
     private func maxSetsPerExercise(for exercise: Exercise) -> Int {

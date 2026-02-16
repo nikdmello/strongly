@@ -13,13 +13,21 @@ final class RestTimerLiveActivityManager {
     private var currentActivity: Activity<RestTimerActivityAttributes>?
 #endif
 
-    func startOrUpdate(endDate: Date, totalDuration: Int) async {
+    func startOrUpdate(endDate: Date, totalDuration: Int, nextStep: RestTimerNextStep?) async {
 #if canImport(ActivityKit)
         guard ActivityAuthorizationInfo().areActivitiesEnabled else { return }
+        if endDate <= Date() {
+            await end()
+            return
+        }
 
         let state = RestTimerActivityAttributes.ContentState(
             endTime: endDate,
-            totalDuration: totalDuration
+            totalDuration: totalDuration,
+            nextStepLabel: nextStep?.lockScreenLabel,
+            nextExerciseName: nextStep?.exerciseName,
+            nextSetNumber: nextStep?.setNumber,
+            nextSetTotal: nextStep?.totalSets
         )
         let content = ActivityContent(state: state, staleDate: endDate)
 
@@ -45,6 +53,7 @@ final class RestTimerLiveActivityManager {
 #else
         _ = endDate
         _ = totalDuration
+        _ = nextStep
 #endif
     }
 
@@ -57,7 +66,11 @@ final class RestTimerLiveActivityManager {
 
         let endState = RestTimerActivityAttributes.ContentState(
             endTime: Date(),
-            totalDuration: 0
+            totalDuration: 0,
+            nextStepLabel: nil,
+            nextExerciseName: nil,
+            nextSetNumber: nil,
+            nextSetTotal: nil
         )
         let content = ActivityContent(state: endState, staleDate: Date())
         await currentActivity.end(content, dismissalPolicy: .immediate)

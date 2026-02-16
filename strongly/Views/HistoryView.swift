@@ -89,14 +89,34 @@ struct HistoryView: View {
 
 struct WeeklyVolumeSection: View {
     let sessions: [WorkoutSession]
-
-    private let targetSets = TrainingTargets.advancedWeeklySets
+    @EnvironmentObject private var planStore: SplitPlanStore
 
     var body: some View {
         VStack(alignment: .leading, spacing: Space.m) {
-            Text("Weekly Volume")
-                .font(.system(size: 18, weight: .bold))
-                .foregroundColor(.white)
+            HStack {
+                Text("Weekly Volume")
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundColor(.white)
+
+                Spacer()
+
+                Button(planStore.weeklyVolumeResetDate == nil ? "Clear" : "Restore") {
+                    withAnimation(Motion.quick) {
+                        if planStore.weeklyVolumeResetDate == nil {
+                            planStore.clearWeeklyVolumeForTesting()
+                        } else {
+                            planStore.restoreWeeklyVolumeTracking()
+                        }
+                    }
+                }
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(.white.opacity(0.85))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(Color.white.opacity(0.12))
+                .clipShape(Capsule())
+                .buttonStyle(.plain)
+            }
 
             VStack(spacing: Space.s) {
                 ForEach(MuscleGroup.allCases, id: \.self) { muscle in
@@ -110,6 +130,7 @@ struct WeeklyVolumeSection: View {
 
     private func weeklyRow(for muscle: MuscleGroup) -> some View {
         let sets = normalizedVolumes[muscle]?.sets ?? 0
+        let targetSets = planStore.plan.weeklyTargets[muscle] ?? TrainingTargets.advancedWeeklySets
         let progress = min(sets / targetSets, 1)
 
         return VStack(alignment: .leading, spacing: 6) {
@@ -139,7 +160,10 @@ struct WeeklyVolumeSection: View {
     }
 
     private var normalizedVolumes: [MuscleGroup: MuscleVolume] {
-        var volumes = MuscleTracker.calculateWeeklyVolume(sessions: sessions)
+        var volumes = MuscleTracker.calculateWeeklyVolume(
+            sessions: sessions,
+            fromDate: planStore.weeklyVolumeWindowStart()
+        )
         for muscle in MuscleGroup.allCases {
             if volumes[muscle] == nil {
                 volumes[muscle] = MuscleVolume(muscle: muscle, sets: 0, totalVolume: 0)
@@ -237,7 +261,7 @@ struct AllWorkoutsView: View {
                     ZStack {
                         WorkoutCard(session: session)
                     }
-                    .listRowInsets(EdgeInsets(top: 0, leading: 0, bottom: 12, trailing: 0))
+                    .listRowInsets(EdgeInsets(top: 0, leading: Space.m, bottom: 12, trailing: Space.m))
                     .listRowBackground(Color.clear)
                     .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                         Button(role: .destructive) {
@@ -293,4 +317,5 @@ final class HistoryViewModel: ObservableObject {
 
 #Preview {
     HistoryView()
+        .environmentObject(SplitPlanStore())
 }

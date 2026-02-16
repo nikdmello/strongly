@@ -261,11 +261,18 @@ final class SplitPlanStore: ObservableObject {
     @Published private(set) var lastRestShift: RestShiftRecord? {
         didSet { saveRestShift() }
     }
+    @Published private(set) var weeklyCompletedSets: [MuscleGroup: Double]
+    @Published private(set) var weeklyVolumeResetDate: Date? {
+        didSet { saveWeeklyVolumeResetDate() }
+    }
 
+    private let repository: WorkoutRepository
+    private var historyChangeCancellable: AnyCancellable?
     private let storageKey = "split_plan_v1"
     private let cursorKey = "split_plan_cursor_v1"
     private let overridesKey = "split_plan_overrides_v1"
     private let restShiftKey = "split_plan_rest_shift_v1"
+    private let weeklyVolumeResetKey = "split_plan_weekly_volume_reset_v1"
     private static let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.calendar = Calendar(identifier: .gregorian)
@@ -275,7 +282,8 @@ final class SplitPlanStore: ObservableObject {
         return formatter
     }()
 
-    init() {
+    init(repository: WorkoutRepository = FileSystemWorkoutRepository()) {
+        self.repository = repository
         let initialPlan: SplitPlan
         if let data = UserDefaults.standard.data(forKey: storageKey),
            let decoded = try? JSONDecoder().decode(SplitPlan.self, from: data) {
@@ -297,6 +305,15 @@ final class SplitPlanStore: ObservableObject {
         } else {
             self.lastRestShift = nil
         }
+        self.weeklyVolumeResetDate = UserDefaults.standard.object(forKey: weeklyVolumeResetKey) as? Date
+        self.weeklyCompletedSets = [:]
+
+        historyChangeCancellable = NotificationCenter.default.publisher(for: .workoutHistoryDidChange)
+            .sink { [weak self] _ in
+                guard let self else { return }
+                Task { await self.refreshWeeklyCompletedSets() }
+            }
+        Task { await refreshWeeklyCompletedSets() }
     }
 
     func applyTemplate(trainingDays: Int, splitType: SplitType) {
@@ -309,6 +326,12 @@ final class SplitPlanStore: ObservableObject {
         currentDayIndex = Self.todayDayIndex(in: plan)
         dayOverrides = [:]
         lastRestShift = nil
+    }
+
+    func updateDayFromBuilder(_ updatedDay: SplitDayConfig) {
+        guard let index = plan.days.firstIndex(where: { $0.id == updatedDay.id }) else { return }
+        plan.days[index] = updatedDay
+        clearOverridesForCurrentWeek(dayIndex: updatedDay.dayIndex)
     }
 
     func resetTargets() {
@@ -339,7 +362,114 @@ final class SplitPlanStore: ObservableObject {
 
     func targetsForDate(_ date: Date = Date()) -> [MuscleGroup: Double] {
         let day = dayConfig(for: date)
-        return VolumeEngine.targetsForDay(plan: plan, day: day)
+        guard !day.isRest else { return [:] }
+
+        var targets: [MuscleGroup: Double] = [:]
+        let weeklyTargetsByGroup = VolumeEngine.weeklyTargetsByGroup(plan: plan)
+        let completedByGroup = weeklyCompletedByGroup()
+        var musclesByGroup: [MuscleTrainingGroup: [MuscleGroup]] = [:]
+
+        for muscle in day.resolvedMuscles() {
+            if musclesByGroup[muscle.trainingGroup, default: []].contains(muscle) {
+                continue
+            }
+            musclesByGroup[muscle.trainingGroup, default: []].append(muscle)
+        }
+
+        for (group, musclesForGroup) in musclesByGroup {
+            guard !musclesForGroup.isEmpty else { continue }
+
+            let weeklyTarget = weeklyTargetsByGroup[group] ?? TrainingTargets.advancedWeeklySets
+            let completed = completedByGroup[group] ?? 0
+            let remaining = max(0, weeklyTarget - completed)
+            let sessionsInWindow = sessionsInRollingWeek(
+                for: group,
+                from: date,
+                windowDays: 7
+            )
+
+            guard sessionsInWindow > 0 else {
+                for muscle in musclesForGroup {
+                    targets[muscle] = 0
+                }
+                continue
+            }
+
+            let effectiveSessions = max(sessionsInWindow, 2)
+            let rawGroupTargetToday = remaining / Double(effectiveSessions)
+            let totalGroupTargetToday = rawGroupTargetToday > 0 ? max(1, Int(rawGroupTargetToday.rounded())) : 0
+            let perMuscleTargets = distribute(totalGroupTargetToday, count: musclesForGroup.count)
+
+            for (index, muscle) in musclesForGroup.enumerated() where index < perMuscleTargets.count {
+                targets[muscle] = Double(perMuscleTargets[index])
+            }
+        }
+
+        return targets
+    }
+
+    private func weeklyCompletedByGroup() -> [MuscleTrainingGroup: Double] {
+        var completed: [MuscleTrainingGroup: Double] = [:]
+        for group in MuscleTrainingGroup.allCases {
+            let total = group.muscles.reduce(0.0) { partial, muscle in
+                partial + (weeklyCompletedSets[muscle] ?? 0)
+            }
+            completed[group] = total
+        }
+        return completed
+    }
+
+    private func distribute(_ total: Int, count: Int) -> [Int] {
+        guard count > 0 else { return [] }
+        guard total > 0 else { return Array(repeating: 0, count: count) }
+
+        let base = total / count
+        let remainder = total % count
+        var result = Array(repeating: base, count: count)
+        if remainder > 0 {
+            for index in 0..<remainder {
+                result[index] += 1
+            }
+        }
+        return result
+    }
+
+    func clearWeeklyVolumeForTesting() {
+        weeklyVolumeResetDate = Date()
+        Task { await refreshWeeklyCompletedSets() }
+    }
+
+    func restoreWeeklyVolumeTracking() {
+        weeklyVolumeResetDate = nil
+        Task { await refreshWeeklyCompletedSets() }
+    }
+
+    func weeklyVolumeWindowStart(for date: Date = Date()) -> Date {
+        let calendar = Calendar.current
+        let startOfDay = calendar.startOfDay(for: date)
+        let rollingStart = calendar.date(byAdding: .day, value: -6, to: startOfDay) ?? startOfDay
+        guard let weeklyVolumeResetDate else { return rollingStart }
+        return max(rollingStart, weeklyVolumeResetDate)
+    }
+
+    func setAgendaForToday(_ dayType: DayType) {
+        let today = Date()
+        let key = dateKey(for: today)
+        dayOverrides[key] = DayOverride(dayType: dayType, customMuscles: nil)
+        if lastRestShift != nil {
+            lastRestShift = nil
+        }
+    }
+
+    func resetAgendaForTodayToPlan() {
+        let today = Date()
+        let key = dateKey(for: today)
+        dayOverrides.removeValue(forKey: key)
+    }
+
+    func hasAgendaOverrideForToday() -> Bool {
+        let key = dateKey(for: Date())
+        return dayOverrides[key] != nil
     }
 
     func canSkipRestToday() -> Bool {
@@ -411,6 +541,14 @@ final class SplitPlanStore: ObservableObject {
         }
     }
 
+    private func saveWeeklyVolumeResetDate() {
+        if let weeklyVolumeResetDate {
+            UserDefaults.standard.set(weeklyVolumeResetDate, forKey: weeklyVolumeResetKey)
+        } else {
+            UserDefaults.standard.removeObject(forKey: weeklyVolumeResetKey)
+        }
+    }
+
     private static func firstTrainingDayIndex(in plan: SplitPlan) -> Int {
         for (index, day) in plan.days.enumerated() {
             if !day.isRest {
@@ -455,5 +593,90 @@ final class SplitPlanStore: ObservableObject {
 
     private func dateKey(for date: Date) -> String {
         Self.dateFormatter.string(from: date)
+    }
+
+    private func clearOverridesForCurrentWeek(dayIndex: Int) {
+        let weekStart = Self.weekRange(for: Date()).start
+        guard let targetDate = Calendar.current.date(byAdding: .day, value: dayIndex, to: weekStart) else { return }
+        let targetKey = dateKey(for: targetDate)
+
+        dayOverrides.removeValue(forKey: targetKey)
+
+        if let last = lastRestShift,
+           last.trainDateKey == targetKey || last.makeupRestDateKey == targetKey {
+            dayOverrides.removeValue(forKey: last.trainDateKey)
+            dayOverrides.removeValue(forKey: last.makeupRestDateKey)
+            lastRestShift = nil
+        }
+    }
+
+    private func refreshWeeklyCompletedSets() async {
+        let sessions = (try? await repository.fetchAll()) ?? []
+        let now = Date()
+        let start = weeklyVolumeWindowStart(for: now)
+        weeklyCompletedSets = Self.completedSetsByMuscle(
+            sessions: sessions,
+            from: start,
+            through: now
+        )
+    }
+
+    private func sessionsInRollingWeek(
+        for group: MuscleTrainingGroup,
+        from startDate: Date,
+        windowDays: Int
+    ) -> Int {
+        let calendar = Calendar.current
+        let start = calendar.startOfDay(for: startDate)
+        guard windowDays > 0 else { return 0 }
+
+        var count = 0
+        for offset in 0..<windowDays {
+            guard let current = calendar.date(byAdding: .day, value: offset, to: start) else { continue }
+            let day = dayConfig(for: current)
+            if day.isRest { continue }
+            let dayGroups = Set(day.resolvedMuscles().map { $0.trainingGroup })
+            if dayGroups.contains(group) {
+                count += 1
+            }
+        }
+        return count
+    }
+
+    private static func weekRange(for date: Date) -> (start: Date, end: Date) {
+        let calendar = Calendar(identifier: .gregorian)
+        let startOfDay = calendar.startOfDay(for: date)
+        let weekday = calendar.component(.weekday, from: startOfDay)
+        let daysFromMonday = (weekday + 5) % 7
+        let start = calendar.date(byAdding: .day, value: -daysFromMonday, to: startOfDay) ?? startOfDay
+        let end = calendar.date(byAdding: .day, value: 6, to: start) ?? startOfDay
+        return (start, end)
+    }
+
+    private static func completedSetsByMuscle(
+        sessions: [WorkoutSession],
+        from start: Date,
+        through end: Date
+    ) -> [MuscleGroup: Double] {
+        var completed: [MuscleGroup: Double] = [:]
+        let calendar = Calendar.current
+        let endOfDay = calendar.date(bySettingHour: 23, minute: 59, second: 59, of: end) ?? end
+
+        for session in sessions where session.date >= start && session.date <= endOfDay {
+            for exercise in session.exercises {
+                guard let metadata = ExerciseDatabase.shared.getExercise(named: exercise.name) else { continue }
+                let setCount = Double(exercise.sets.filter { $0.completed }.count)
+                guard setCount > 0 else { continue }
+
+                for muscle in metadata.primaryMuscles {
+                    completed[muscle, default: 0] += setCount
+                }
+                for muscle in metadata.secondaryMuscles {
+                    completed[muscle, default: 0] += setCount * TrainingTargets.secondaryMuscleCredit
+                }
+            }
+        }
+
+        return completed
     }
 }

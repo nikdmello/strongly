@@ -444,6 +444,13 @@ class WorkoutGenerator {
             request: request
         )
 
+        selected = ensurePrimaryCoverage(
+            selected: selected,
+            candidates: targetScored.isEmpty ? scored : targetScored,
+            maxExercises: maxExercises,
+            targetMuscles: targetSet
+        )
+
         return selected
     }
 
@@ -517,6 +524,77 @@ class WorkoutGenerator {
 
     private func isBodyweightOrBand(_ equipment: Equipment) -> Bool {
         equipment == .bodyweight || equipment == .band
+    }
+
+    private func ensurePrimaryCoverage(
+        selected: [ExerciseScore],
+        candidates: [ExerciseScore],
+        maxExercises: Int,
+        targetMuscles: Set<MuscleGroup>
+    ) -> [ExerciseScore] {
+        guard !targetMuscles.isEmpty else { return selected }
+
+        var updated = selected
+        for muscle in targetMuscles {
+            let alreadyPrimaryCovered = updated.contains { score in
+                score.exercise.primaryMuscles.contains(muscle)
+            }
+            if alreadyPrimaryCovered { continue }
+
+            guard let candidate = candidates.first(where: { score in
+                score.exercise.primaryMuscles.contains(muscle) &&
+                !updated.contains(where: { $0.exercise.id == score.exercise.id })
+            }) else {
+                continue
+            }
+
+            if updated.count < maxExercises {
+                updated.append(candidate)
+                continue
+            }
+
+            guard let replacementIndex = replacementIndexForPrimaryCoverage(
+                selected: updated,
+                targetMuscles: targetMuscles
+            ) else {
+                continue
+            }
+
+            updated[replacementIndex] = candidate
+        }
+        return updated
+    }
+
+    private func replacementIndexForPrimaryCoverage(
+        selected: [ExerciseScore],
+        targetMuscles: Set<MuscleGroup>
+    ) -> Int? {
+        guard !selected.isEmpty else { return nil }
+
+        var coverageCount: [MuscleGroup: Int] = [:]
+        for score in selected {
+            let covered = Set(score.exercise.primaryMuscles).intersection(targetMuscles)
+            for muscle in covered {
+                coverageCount[muscle, default: 0] += 1
+            }
+        }
+
+        var replaceable: [(index: Int, score: Double)] = []
+        for (index, entry) in selected.enumerated() {
+            let covered = Set(entry.exercise.primaryMuscles).intersection(targetMuscles)
+            let isSafeToReplace = covered.allSatisfy { muscle in
+                (coverageCount[muscle] ?? 0) > 1
+            }
+            if isSafeToReplace {
+                replaceable.append((index: index, score: entry.score))
+            }
+        }
+
+        if let best = replaceable.min(by: { $0.score < $1.score }) {
+            return best.index
+        }
+
+        return selected.enumerated().min(by: { $0.element.score < $1.element.score })?.offset
     }
 
     private func buildExerciseLogs(

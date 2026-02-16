@@ -1,5 +1,24 @@
 import Foundation
 import Combine
+#if canImport(UIKit)
+import UIKit
+#endif
+
+struct RestTimerNextStep {
+    let exerciseName: String
+    let setNumber: Int
+    let totalSets: Int
+    let isSameExercise: Bool
+
+    var lockScreenLabel: String {
+        let prefix = isSameExercise ? "Next set" : "Next exercise"
+        return "\(prefix): \(exerciseName) \(setNumber)/\(max(totalSets, 1))"
+    }
+
+    var notificationBody: String {
+        "Up next: \(exerciseName) set \(setNumber) of \(max(totalSets, 1))."
+    }
+}
 
 @MainActor
 final class RestTimerViewModel: ObservableObject {
@@ -9,6 +28,11 @@ final class RestTimerViewModel: ObservableObject {
 
     private var timerTask: Task<Void, Never>?
     private var endDate: Date?
+    private var activeNextStep: RestTimerNextStep?
+#if canImport(UIKit)
+    private var backgroundTaskID: UIBackgroundTaskIdentifier = .invalid
+#endif
+    private var cancellables = Set<AnyCancellable>()
     private let notificationManager = RestTimerNotificationManager.shared
     private let liveActivityManager = RestTimerLiveActivityManager.shared
 
@@ -22,6 +46,7 @@ final class RestTimerViewModel: ObservableObject {
         let savedDefault = UserDefaults.standard.integer(forKey: Self.preferredDurationKey)
         let resolvedDefault = Self.normalizeDuration(savedDefault == 0 ? Self.defaultDuration : savedDefault)
         self.preferredDuration = resolvedDefault
+        configureLifecycleObservers()
 
         let savedEndDate = UserDefaults.standard.object(forKey: Self.activeEndDateKey) as? Date
         if let savedEndDate, savedEndDate.timeIntervalSinceNow > 0 {
@@ -30,14 +55,25 @@ final class RestTimerViewModel: ObservableObject {
             remainingTime = max(1, Int(ceil(savedEndDate.timeIntervalSinceNow)))
             scheduleTick()
             Task {
-                await liveActivityManager.startOrUpdate(endDate: savedEndDate, totalDuration: preferredDuration)
+                await liveActivityManager.startOrUpdate(
+                    endDate: savedEndDate,
+                    totalDuration: preferredDuration,
+                    nextStep: nil
+                )
             }
         } else {
             UserDefaults.standard.removeObject(forKey: Self.activeEndDateKey)
+            Task {
+                await liveActivityManager.end()
+            }
         }
     }
 
-    func startTimer(duration: Int? = nil, persistAsDefault: Bool = false) {
+    func startTimer(
+        duration: Int? = nil,
+        persistAsDefault: Bool = false,
+        nextStep: RestTimerNextStep? = nil
+    ) {
         timerTask?.cancel()
 
         let actualDuration = Self.normalizeDuration(duration ?? preferredDuration)
@@ -49,13 +85,18 @@ final class RestTimerViewModel: ObservableObject {
         endDate = timerEndDate
         remainingTime = actualDuration
         isActive = true
+        activeNextStep = nextStep
 
         UserDefaults.standard.set(timerEndDate, forKey: Self.activeEndDateKey)
         notificationManager.requestAuthorizationIfNeeded()
-        notificationManager.scheduleTimerFinishedNotification(in: actualDuration)
+        notificationManager.scheduleTimerFinishedNotification(in: actualDuration, nextStep: nextStep)
 
         Task {
-            await liveActivityManager.startOrUpdate(endDate: timerEndDate, totalDuration: actualDuration)
+            await liveActivityManager.startOrUpdate(
+                endDate: timerEndDate,
+                totalDuration: actualDuration,
+                nextStep: nextStep
+            )
         }
         scheduleTick()
     }
@@ -67,7 +108,7 @@ final class RestTimerViewModel: ObservableObject {
             stopTimer()
             return
         }
-        startTimer(duration: adjusted, persistAsDefault: true)
+        startTimer(duration: adjusted, persistAsDefault: true, nextStep: activeNextStep)
     }
 
     func setPreferredDuration(_ seconds: Int) {
@@ -82,6 +123,8 @@ final class RestTimerViewModel: ObservableObject {
         isActive = false
         remainingTime = 0
         endDate = nil
+        activeNextStep = nil
+        endBackgroundTaskIfNeeded()
         UserDefaults.standard.removeObject(forKey: Self.activeEndDateKey)
         notificationManager.cancelTimerFinishedNotification()
 
@@ -106,7 +149,7 @@ final class RestTimerViewModel: ObservableObject {
         timerTask?.cancel()
         timerTask = Task { [weak self] in
             while let self, !Task.isCancelled {
-                await self.syncRemainingTime()
+                self.syncRemainingTime()
                 if !self.isActive {
                     break
                 }
@@ -135,12 +178,51 @@ final class RestTimerViewModel: ObservableObject {
         isActive = false
         remainingTime = 0
         endDate = nil
+        activeNextStep = nil
+        endBackgroundTaskIfNeeded()
         UserDefaults.standard.removeObject(forKey: Self.activeEndDateKey)
         notificationManager.cancelTimerFinishedNotification()
         HapticFeedback.success.trigger()
         Task {
             await liveActivityManager.end()
         }
+    }
+
+    private func configureLifecycleObservers() {
+#if canImport(UIKit)
+        NotificationCenter.default.publisher(for: UIApplication.didEnterBackgroundNotification)
+            .sink { [weak self] _ in
+                self?.beginBackgroundTaskIfNeeded()
+            }
+            .store(in: &cancellables)
+
+        NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)
+            .sink { [weak self] _ in
+                self?.endBackgroundTaskIfNeeded()
+            }
+            .store(in: &cancellables)
+#endif
+    }
+
+    private func beginBackgroundTaskIfNeeded() {
+#if canImport(UIKit)
+        guard isActive else { return }
+        guard backgroundTaskID == .invalid else { return }
+
+        backgroundTaskID = UIApplication.shared.beginBackgroundTask(withName: "StronglyRestTimer") { [weak self] in
+            Task { @MainActor in
+                self?.stopTimer()
+            }
+        }
+#endif
+    }
+
+    private func endBackgroundTaskIfNeeded() {
+#if canImport(UIKit)
+        guard backgroundTaskID != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(backgroundTaskID)
+        backgroundTaskID = .invalid
+#endif
     }
 
     private static func normalizeDuration(_ seconds: Int) -> Int {
