@@ -151,9 +151,18 @@ struct MuscleVolume {
 }
 
 class MuscleTracker {
-    static func calculateWeeklyVolume(sessions: [WorkoutSession]) -> [MuscleGroup: MuscleVolume] {
+    static func calculateWeeklyVolume(
+        sessions: [WorkoutSession],
+        fromDate: Date? = nil
+    ) -> [MuscleGroup: MuscleVolume] {
         let weekAgo = Calendar.current.date(byAdding: .day, value: -7, to: Date()) ?? Date()
-        let recentSessions = sessions.filter { $0.date >= weekAgo }
+        let lowerBound: Date
+        if let fromDate {
+            lowerBound = max(weekAgo, fromDate)
+        } else {
+            lowerBound = weekAgo
+        }
+        let recentSessions = sessions.filter { $0.date >= lowerBound }
 
         var volumes: [MuscleGroup: MuscleVolume] = [:]
 

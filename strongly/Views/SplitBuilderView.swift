@@ -26,9 +26,7 @@ struct SplitBuilderView: View {
                 DayTargetEditorView(
                     day: day,
                     onSave: { updated in
-                        if let index = store.plan.days.firstIndex(where: { $0.id == updated.id }) {
-                            store.plan.days[index] = updated
-                        }
+                        store.updateDayFromBuilder(updated)
                     }
                 )
             }
@@ -238,11 +236,11 @@ struct SplitBuilderView: View {
                 .foregroundColor(.white)
 
             VStack(spacing: Space.s) {
-                ForEach(store.plan.days) { day in
+                ForEach(Array(store.plan.days.enumerated()), id: \.element.id) { index, _ in
+                    let date = dateForCurrentWeek(dayIndex: index)
+                    let day = store.dayConfig(for: date)
                     Button {
-                        if !day.isRest {
-                            editingDay = day
-                        }
+                        editingDay = day
                     } label: {
                         HStack {
                             VStack(alignment: .leading, spacing: 4) {
@@ -264,11 +262,9 @@ struct SplitBuilderView: View {
                                     .frame(maxWidth: 200, alignment: .trailing)
                             }
 
-                            if !day.isRest {
-                                Image(systemName: "chevron.right")
-                                    .font(.system(size: 11, weight: .semibold))
-                                    .foregroundColor(.white.opacity(0.4))
-                            }
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundColor(.white.opacity(0.4))
                         }
                         .padding(Space.m)
                         .background(Color.white.opacity(0.08))
@@ -290,6 +286,16 @@ struct SplitBuilderView: View {
         let symbols = Calendar.current.weekdaySymbols
         let mondayFirstIndex = (index + 1) % 7
         return symbols[mondayFirstIndex]
+    }
+
+    private func dateForCurrentWeek(dayIndex: Int) -> Date {
+        let calendar = Calendar.current
+        let today = Date()
+        let startOfDay = calendar.startOfDay(for: today)
+        let weekday = calendar.component(.weekday, from: startOfDay)
+        let daysFromMonday = (weekday + 5) % 7
+        let monday = calendar.date(byAdding: .day, value: -daysFromMonday, to: startOfDay) ?? startOfDay
+        return calendar.date(byAdding: .day, value: dayIndex, to: monday) ?? startOfDay
     }
 
     private func recommendedSplitType(for _: Int) -> SplitType {

@@ -16,12 +16,12 @@ final class RestTimerNotificationManager {
         }
     }
 
-    func scheduleTimerFinishedNotification(in seconds: Int) {
+    func scheduleTimerFinishedNotification(in seconds: Int, nextStep: RestTimerNextStep?) {
         cancelTimerFinishedNotification()
 
         let content = UNMutableNotificationContent()
         content.title = "Rest Complete"
-        content.body = "Time for your next set."
+        content.body = nextStep?.notificationBody ?? "Time for your next set."
         content.sound = .default
 
         let trigger = UNTimeIntervalNotificationTrigger(timeInterval: TimeInterval(max(1, seconds)), repeats: false)

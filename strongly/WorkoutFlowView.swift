@@ -26,6 +26,7 @@ struct WorkoutFlowView: View {
     let initialSession: WorkoutSession?
     let repository: WorkoutRepository
     let preloadedExercises: [ExerciseLog]
+    let targetOverrides: [MuscleGroup: Double]
 
     @StateObject private var sessionViewModel: WorkoutSessionViewModel
     @StateObject private var restTimer = RestTimerViewModel()
@@ -39,10 +40,16 @@ struct WorkoutFlowView: View {
     @State private var showCancelAlert = false
     @State private var isCompleted = false
 
-    init(initialSession: WorkoutSession?, repository: WorkoutRepository, preloadedExercises: [ExerciseLog] = []) {
+    init(
+        initialSession: WorkoutSession?,
+        repository: WorkoutRepository,
+        preloadedExercises: [ExerciseLog] = [],
+        targetOverrides: [MuscleGroup: Double] = [:]
+    ) {
         self.initialSession = initialSession
         self.repository = repository
         self.preloadedExercises = preloadedExercises
+        self.targetOverrides = targetOverrides
         self._sessionViewModel = StateObject(wrappedValue: WorkoutSessionViewModel(repository: repository))
     }
 
@@ -251,72 +258,105 @@ struct WorkoutFlowView: View {
 
     private func workoutContent(_ session: WorkoutSession) -> some View {
         let todayTargets = todayTargetSets
-        let focusProgress = focusProgress(for: session, targets: todayTargets)
-        let orderedFocusMuscles = todayTargets.keys.sorted { $0.displayName < $1.displayName }
-        let totalTargetSets = todayTargets.values.reduce(0, +)
-        let totalCompletedFocusSets = orderedFocusMuscles.reduce(0.0) { partial, muscle in
-            partial + min(focusProgress.completed[muscle] ?? 0, todayTargets[muscle] ?? 0)
-        }
+        let focusTargetMuscles = Set(todayTargets.keys)
+        let focusProgress = focusProgress(for: session, targetMuscles: focusTargetMuscles)
+        let effectiveTargets = focusProgress.planned.filter { $0.value > 0 }
+        let orderedFocusMuscles = effectiveTargets.keys.sorted { $0.displayName < $1.displayName }
+        let completedWorkSets = completedSets(session)
+        let totalWorkSets = totalSets(session)
 
-        return ScrollView {
-            VStack(alignment: .leading, spacing: Spacing.l) {
-                if !todayTargets.isEmpty {
-                    VStack(alignment: .leading, spacing: 12) {
-                        HStack(alignment: .center) {
-                            Text("Today’s Focus")
-                                .font(.system(size: 14, weight: .bold))
-                                .foregroundColor(.white.opacity(0.85))
-                            Spacer()
-                            Text("\(formatSets(totalCompletedFocusSets)) / \(formatSets(totalTargetSets)) sets complete")
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundColor(.white.opacity(0.65))
-                        }
+        return List {
+            if !orderedFocusMuscles.isEmpty {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(alignment: .center) {
+                        Text("Today’s Focus")
+                            .font(.system(size: 14, weight: .bold))
+                            .foregroundColor(.white.opacity(0.85))
+                        Spacer()
+                        Text("\(completedWorkSets) / \(totalWorkSets) work sets complete")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundColor(.white.opacity(0.65))
+                    }
 
-                        GeometryReader { geo in
-                            let completion = totalTargetSets > 0 ? min(totalCompletedFocusSets / totalTargetSets, 1.0) : 0
-                            Capsule()
-                                .fill(Color.white.opacity(0.14))
-                                .frame(height: 8)
-                                .overlay(alignment: .leading) {
-                                    Capsule()
-                                        .fill(Color.spaceGlow)
-                                        .frame(width: max(8, geo.size.width * completion), height: 8)
-                                }
-                        }
-                        .frame(height: 8)
-
-                        VStack(spacing: 10) {
-                            ForEach(orderedFocusMuscles, id: \.self) { muscle in
-                                let target = todayTargets[muscle] ?? 0
-                                let completed = focusProgress.completed[muscle] ?? 0
-                                let planned = focusProgress.planned[muscle] ?? 0
-                                TodayFocusProgressRow(
-                                    muscle: muscle,
-                                    target: target,
-                                    completed: completed,
-                                    planned: planned
-                                )
+                    GeometryReader { geo in
+                        let completion = totalWorkSets > 0
+                            ? min(Double(completedWorkSets) / Double(totalWorkSets), 1.0)
+                            : 0
+                        Capsule()
+                            .fill(Color.white.opacity(0.14))
+                            .frame(height: 8)
+                            .overlay(alignment: .leading) {
+                                Capsule()
+                                    .fill(Color.spaceGlow)
+                                    .frame(width: max(8, geo.size.width * completion), height: 8)
                             }
+                    }
+                    .frame(height: 8)
+
+                    VStack(spacing: 10) {
+                        ForEach(orderedFocusMuscles, id: \.self) { muscle in
+                            let target = effectiveTargets[muscle] ?? 0
+                            let completed = focusProgress.completed[muscle] ?? 0
+                            let planned = focusProgress.planned[muscle] ?? 0
+                            TodayFocusProgressRow(
+                                muscle: muscle,
+                                target: target,
+                                completed: completed,
+                                planned: planned
+                            )
                         }
                     }
-                    .padding(Spacing.m)
-                    .themedCard(cornerRadius: 18)
                 }
+                .padding(Spacing.m)
+                .themedCard(cornerRadius: 18)
+                .listRowInsets(EdgeInsets(top: Spacing.m, leading: Spacing.m, bottom: Spacing.s, trailing: Spacing.m))
+                .listRowSeparator(.hidden)
+                .listRowBackground(Color.clear)
+            }
 
+            if session.exercises.isEmpty {
+                VStack(spacing: Spacing.m) {
+                    Image(systemName: "figure.strengthtraining.traditional")
+                        .font(.system(size: 64))
+                        .foregroundColor(.white.opacity(0.55))
+
+                    VStack(spacing: Spacing.xs) {
+                        Text("Ready to start?")
+                            .font(.title)
+                            .foregroundColor(.white)
+
+                        Text("Add your first exercise below")
+                            .font(.body)
+                            .foregroundColor(.white.opacity(0.7))
+                    }
+
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, Spacing.xl)
+                .themedCard(cornerRadius: 18)
+                .listRowInsets(EdgeInsets(top: 0, leading: Spacing.m, bottom: Spacing.m, trailing: Spacing.m))
+                .listRowSeparator(.hidden)
+                .listRowBackground(Color.clear)
+            } else {
                 ForEach(session.exercises) { exercise in
                     MinimalExerciseCard(
                         exercise: exercise,
-                        targetContributions: targetContributions(for: exercise, targets: todayTargets),
+                        targetContributions: targetContributions(
+                            for: exercise,
+                            targets: effectiveTargets.isEmpty ? todayTargets : effectiveTargets
+                        ),
+                        showDeleteButton: false,
                         onAddSet: { weight, reps in
                             sessionViewModel.addSet(to: exercise.id, weight: weight, reps: reps)
                             showSetCelebration()
-                            restTimer.startTimer()
+                            restTimer.startTimer(nextStep: nil)
                         },
                         onToggleSet: { setId in
                             let wasCompleted = exercise.sets.first(where: { $0.id == setId })?.completed ?? false
+                            let nextStep = !wasCompleted ? nextStepAfterCompletingSet(setId: setId, session: session) : nil
                             sessionViewModel.toggleSetCompletion(setId: setId)
                             if !wasCompleted {
-                                restTimer.startTimer()
+                                restTimer.startTimer(nextStep: nextStep)
                             }
                         },
                         onDeleteSet: { setId in
@@ -329,61 +369,60 @@ struct WorkoutFlowView: View {
                             sessionViewModel.deleteExercise(exerciseId: exercise.id)
                         }
                     )
-                }
-
-                if session.exercises.isEmpty {
-                    VStack(spacing: Spacing.m) {
-                        Image(systemName: "figure.strengthtraining.traditional")
-                            .font(.system(size: 64))
-                            .foregroundColor(.white.opacity(0.55))
-
-                        VStack(spacing: Spacing.xs) {
-                            Text("Ready to start?")
-                                .font(.title)
-                                .foregroundColor(.white)
-
-                            Text("Add your first exercise below")
-                                .font(.body)
-                                .foregroundColor(.white.opacity(0.7))
+                    .listRowInsets(EdgeInsets(top: 0, leading: Spacing.m, bottom: Spacing.xs, trailing: Spacing.m))
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
+                    .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                        Button(role: .destructive) {
+                            HapticFeedback.warning.trigger()
+                            sessionViewModel.deleteExercise(exerciseId: exercise.id)
+                        } label: {
+                            Image(systemName: "trash")
                         }
-
                     }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, Spacing.xl)
-                    .themedCard(cornerRadius: 18)
                 }
             }
-            .padding(.vertical, Spacing.m)
         }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
         .scrollDismissesKeyboard(.immediately)
         .background(Color.clear)
     }
 
     private var todayTargetSets: [MuscleGroup: Double] {
-        planStore.targetsForDate()
+        if !targetOverrides.isEmpty {
+            return targetOverrides
+        }
+        return planStore.targetsForDate()
     }
 
     private func focusProgress(
         for session: WorkoutSession,
-        targets: [MuscleGroup: Double]
+        targetMuscles: Set<MuscleGroup>
     ) -> (completed: [MuscleGroup: Double], planned: [MuscleGroup: Double]) {
         var completed: [MuscleGroup: Double] = [:]
         var planned: [MuscleGroup: Double] = [:]
-        let targetMuscles = Set(targets.keys)
 
         for exercise in session.exercises {
             guard let metadata = ExerciseDatabase.shared.getExercise(named: exercise.name) else { continue }
             let completedSetCount = Double(exercise.sets.filter { $0.completed }.count)
             let plannedSetCount = Double(exercise.sets.count)
 
+            var weightedMuscles: [(muscle: MuscleGroup, weight: Double)] = []
             for muscle in metadata.primaryMuscles where targetMuscles.contains(muscle) {
-                completed[muscle, default: 0] += completedSetCount
-                planned[muscle, default: 0] += plannedSetCount
+                weightedMuscles.append((muscle: muscle, weight: 1.0))
+            }
+            for muscle in metadata.secondaryMuscles where targetMuscles.contains(muscle) {
+                weightedMuscles.append((muscle: muscle, weight: TrainingTargets.secondaryMuscleCredit))
             }
 
-            for muscle in metadata.secondaryMuscles where targetMuscles.contains(muscle) {
-                completed[muscle, default: 0] += completedSetCount * TrainingTargets.secondaryMuscleCredit
-                planned[muscle, default: 0] += plannedSetCount * TrainingTargets.secondaryMuscleCredit
+            let totalWeight = weightedMuscles.reduce(0.0) { $0 + $1.weight }
+            guard totalWeight > 0 else { continue }
+
+            for weighted in weightedMuscles {
+                let normalizedWeight = weighted.weight / totalWeight
+                completed[weighted.muscle, default: 0] += completedSetCount * normalizedWeight
+                planned[weighted.muscle, default: 0] += plannedSetCount * normalizedWeight
             }
         }
 
@@ -575,6 +614,64 @@ struct WorkoutFlowView: View {
         return String(format: "%.1f", value)
     }
 
+    private func nextStepAfterCompletingSet(setId: UUID, session: WorkoutSession) -> RestTimerNextStep? {
+        guard let activeExerciseIndex = session.exercises.firstIndex(where: { exercise in
+            exercise.sets.contains(where: { $0.id == setId })
+        }) else {
+            return nil
+        }
+
+        let activeExercise = session.exercises[activeExerciseIndex]
+        guard let toggledSetIndex = activeExercise.sets.firstIndex(where: { $0.id == setId }) else {
+            return nil
+        }
+
+        let completedSetCount = activeExercise.sets.enumerated().reduce(0) { partial, pair in
+            let (index, set) = pair
+            if index == toggledSetIndex {
+                return partial + 1
+            }
+            return partial + (set.completed ? 1 : 0)
+        }
+        let totalSets = max(activeExercise.sets.count, 1)
+        if completedSetCount < totalSets {
+            return RestTimerNextStep(
+                exerciseName: activeExercise.name,
+                setNumber: completedSetCount + 1,
+                totalSets: totalSets,
+                isSameExercise: true
+            )
+        }
+
+        let nextExerciseStart = activeExerciseIndex + 1
+        if nextExerciseStart < session.exercises.count {
+            for exercise in session.exercises[nextExerciseStart...] {
+                if let firstIncompleteSet = exercise.sets.firstIndex(where: { !$0.completed }) {
+                    return RestTimerNextStep(
+                        exerciseName: exercise.name,
+                        setNumber: firstIncompleteSet + 1,
+                        totalSets: max(exercise.sets.count, 1),
+                        isSameExercise: false
+                    )
+                }
+            }
+        }
+
+        for exercise in session.exercises {
+            if exercise.id == activeExercise.id { continue }
+            if let firstIncompleteSet = exercise.sets.firstIndex(where: { !$0.completed }) {
+                return RestTimerNextStep(
+                    exerciseName: exercise.name,
+                    setNumber: firstIncompleteSet + 1,
+                    totalSets: max(exercise.sets.count, 1),
+                    isSameExercise: false
+                )
+            }
+        }
+
+        return nil
+    }
+
     private var completionView: some View {
         VStack(spacing: 0) {
             Spacer()
@@ -664,7 +761,7 @@ struct TodayFocusProgressRow: View {
 
                 Spacer()
 
-                Text("\(formatSets(completed)) / \(formatSets(target))")
+                Text("\(formatSets(displayCompleted)) / \(formatSets(target))")
                     .font(.system(size: 12, weight: .bold))
                     .foregroundColor(.white.opacity(0.85))
             }
@@ -694,21 +791,29 @@ struct TodayFocusProgressRow: View {
                         }
                     }
 
-                Text("planned \(formatSets(planned))")
+                Text("scheduled \(formatSets(scheduled))")
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundColor(planned >= target ? .spaceGlow : .white.opacity(0.6))
+                    .foregroundColor(scheduled >= target ? .spaceGlow : .white.opacity(0.6))
             }
         }
     }
 
+    private var displayCompleted: Double {
+        min(completed, target)
+    }
+
+    private var scheduled: Double {
+        min(planned, target)
+    }
+
     private var completedRatio: Double {
         guard target > 0 else { return 0 }
-        return min(max(completed / target, 0), 1)
+        return min(max(displayCompleted / target, 0), 1)
     }
 
     private var plannedRatio: Double {
         guard target > 0 else { return 0 }
-        return min(max(planned / target, 0), 1)
+        return min(max(scheduled / target, 0), 1)
     }
 
     private func formatSets(_ value: Double) -> String {
@@ -722,6 +827,7 @@ struct TodayFocusProgressRow: View {
 struct MinimalExerciseCard: View {
     let exercise: ExerciseLog
     let targetContributions: [ExerciseTargetContribution]
+    var showDeleteButton: Bool = true
     let onAddSet: (Double, Int) -> Void
     let onToggleSet: (UUID) -> Void
     let onDeleteSet: (UUID) -> Void
@@ -732,204 +838,167 @@ struct MinimalExerciseCard: View {
     @State private var weightText = ""
     @State private var repsText = ""
     @State private var showDemo = false
-    @State private var swipeOffset: CGFloat = 0
-    @State private var dragAxis: SwipeAxis?
     @FocusState private var focusedField: Field?
-    private let deleteRevealWidth: CGFloat = 92
-    private let exerciseDeleteGap: CGFloat = 10
-    private let exerciseSwipeActivationHeight: CGFloat = 86
-    private let exerciseHorizontalThresholdRatio: CGFloat = 2.2
-    private let exerciseHorizontalMinimum: CGFloat = 24
 
     enum Field {
         case weight, reps
     }
-    private enum SwipeAxis {
-        case horizontal
-        case vertical
-    }
 
     var body: some View {
-        ZStack(alignment: .trailing) {
-            RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(Color.red.opacity(0.94))
-                .frame(width: deleteRevealWidth)
-                .overlay {
-                    Image(systemName: "trash.fill")
-                        .font(.system(size: 16, weight: .semibold))
+        VStack(alignment: .leading, spacing: Spacing.s) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(exercise.name.uppercased())
+                        .font(.label)
                         .foregroundColor(.white)
-                }
-                .opacity(deleteRevealProgress)
-                .padding(.vertical, Spacing.s)
-                .padding(.trailing, 6)
-                .onTapGesture {
-                    if deleteRevealProgress > 0.98 {
-                        HapticFeedback.warning.trigger()
-                        onDeleteExercise()
+
+                    if !exercise.notes.isEmpty {
+                        Text(exercise.notes)
+                            .font(.detail)
+                            .foregroundColor(.white.opacity(0.68))
                     }
                 }
 
-            VStack(alignment: .leading, spacing: Spacing.s) {
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(exercise.name.uppercased())
-                            .font(.label)
-                            .foregroundColor(.white)
+                Spacer()
 
-                        if !exercise.notes.isEmpty {
-                            Text(exercise.notes)
+                HStack(spacing: 10) {
+                    ExerciseCompletionBadge(
+                        completed: completedSetCount,
+                        total: exercise.sets.count
+                    )
+
+                    if exerciseMetadata != nil {
+                        Button {
+                            showDemo = true
+                        } label: {
+                            Image(systemName: "play.rectangle.fill")
                                 .font(.detail)
-                                .foregroundColor(.white.opacity(0.68))
+                                .foregroundColor(.spaceGlow)
+                                .frame(width: 30, height: 30)
+                                .background(Color.white.opacity(0.08))
+                                .clipShape(Circle())
                         }
-
-                        if !targetContributions.isEmpty {
-                            ScrollView(.horizontal, showsIndicators: false) {
-                                HStack(spacing: 6) {
-                                    ForEach(targetContributions, id: \.muscle) { contribution in
-                                        MuscleBadge(
-                                            muscle: contribution.muscle,
-                                            valueText: "\(formatSets(contribution.completedCredit))/\(formatSets(contribution.plannedCredit))",
-                                            compact: true
-                                        )
-                                    }
-                                }
-                                .padding(.top, 4)
-                            }
-                        }
+                        .buttonStyle(.plain)
                     }
 
-                    Spacer()
-
-                    HStack(spacing: 12) {
-                        if exerciseMetadata != nil {
-                            Button {
-                                showDemo = true
-                            } label: {
-                                Image(systemName: "play.rectangle.fill")
-                                    .font(.detail)
-                                    .foregroundColor(.spaceGlow)
-                            }
+                    if showDeleteButton {
+                        Button {
+                            HapticFeedback.warning.trigger()
+                            onDeleteExercise()
+                        } label: {
+                            Image(systemName: "trash.fill")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundColor(.white)
+                                .frame(width: 30, height: 30)
+                                .background(Color.red.opacity(0.9))
+                                .clipShape(Circle())
                         }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            .padding(.horizontal, Spacing.m)
+            .sheet(isPresented: $showDemo) {
+                if let exerciseMetadata {
+                    ExerciseDemoSheet(exercise: exerciseMetadata)
+                }
+            }
+
+            if !targetContributions.isEmpty {
+                VStack(spacing: 6) {
+                    ForEach(visibleContributions, id: \.muscle) { contribution in
+                        ExerciseContributionRow(
+                            muscle: contribution.muscle,
+                            completed: contribution.completedCredit,
+                            planned: contribution.plannedCredit,
+                            valueText: "\(formatSets(contribution.completedCredit))/\(formatSets(contribution.plannedCredit))"
+                        )
+                    }
+                    if targetContributions.count > 3 {
+                        Text("+\(targetContributions.count - 3) more")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundColor(.white.opacity(0.65))
+                            .frame(maxWidth: .infinity, alignment: .trailing)
                     }
                 }
                 .padding(.horizontal, Spacing.m)
-                .sheet(isPresented: $showDemo) {
-                    if let exerciseMetadata {
-                        ExerciseDemoSheet(exercise: exerciseMetadata)
+            }
+
+            if !exercise.sets.isEmpty {
+                VStack(spacing: 0) {
+                    ForEach(Array(exercise.sets.enumerated()), id: \.element.id) { index, set in
+                        MinimalSetRow(
+                            index: index + 1,
+                            set: set,
+                            onToggle: { onToggleSet(set.id) },
+                            onDelete: { onDeleteSet(set.id) }
+                        )
                     }
                 }
+            }
 
-                if !exercise.sets.isEmpty {
-                    VStack(spacing: 0) {
-                        ForEach(Array(exercise.sets.enumerated()), id: \.element.id) { index, set in
-                            MinimalSetRow(
-                                index: index + 1,
-                                set: set,
-                                onToggle: { onToggleSet(set.id) },
-                                onDelete: { onDeleteSet(set.id) }
-                            )
-                        }
+            HStack(spacing: Spacing.s) {
+                TextField(unitStore.unit.symbol, text: $weightText)
+                    .textFieldStyle(.plain)
+                    .keyboardType(.decimalPad)
+                    .submitLabel(.next)
+                    .frame(width: 70)
+                    .padding(Spacing.s)
+                    .background(Color.white.opacity(0.15))
+                    .foregroundColor(.white)
+                    .focused($focusedField, equals: .weight)
+                    .onSubmit {
+                        focusedField = .reps
                     }
-                }
 
-                HStack(spacing: Spacing.s) {
-                    TextField(unitStore.unit.symbol, text: $weightText)
-                        .textFieldStyle(.plain)
-                        .keyboardType(.decimalPad)
-                        .submitLabel(.next)
-                        .frame(width: 70)
-                        .padding(Spacing.s)
-                        .background(Color.white.opacity(0.15))
-                        .foregroundColor(.white)
-                        .focused($focusedField, equals: .weight)
-                        .onSubmit {
-                            focusedField = .reps
-                        }
+                Text("×")
+                    .font(.body)
+                    .foregroundColor(.white.opacity(0.55))
 
-                    Text("×")
+                TextField("reps", text: $repsText)
+                    .textFieldStyle(.plain)
+                    .keyboardType(.numberPad)
+                    .submitLabel(.done)
+                    .frame(width: 60)
+                    .padding(Spacing.s)
+                    .background(Color.white.opacity(0.15))
+                    .foregroundColor(.white)
+                    .focused($focusedField, equals: .reps)
+                    .onSubmit {
+                        if canAddSet { addSet() }
+                    }
+
+                Spacer()
+
+                Button {
+                    addSet()
+                } label: {
+                    Image(systemName: "plus")
                         .font(.body)
-                        .foregroundColor(.white.opacity(0.55))
-
-                    TextField("reps", text: $repsText)
-                        .textFieldStyle(.plain)
-                        .keyboardType(.numberPad)
-                        .submitLabel(.done)
-                        .frame(width: 60)
-                        .padding(Spacing.s)
-                        .background(Color.white.opacity(0.15))
-                        .foregroundColor(.white)
-                        .focused($focusedField, equals: .reps)
-                        .onSubmit {
-                            if canAddSet { addSet() }
-                        }
-
-                    Spacer()
-
-                    Button {
-                        addSet()
-                    } label: {
-                        Image(systemName: "plus")
-                            .font(.body)
-                            .fontWeight(.semibold)
-                            .foregroundColor(canAddSet ? .spaceNavy : .white.opacity(0.5))
-                            .frame(width: 32, height: 32)
-                            .background(canAddSet ? Color.spaceGlow : Color.white.opacity(0.18))
-                            .clipShape(Circle())
-                    }
-                    .disabled(!canAddSet)
+                        .fontWeight(.semibold)
+                        .foregroundColor(canAddSet ? .spaceNavy : .white.opacity(0.5))
+                        .frame(width: 32, height: 32)
+                        .background(canAddSet ? Color.spaceGlow : Color.white.opacity(0.18))
+                        .clipShape(Circle())
                 }
-                .padding(.horizontal, Spacing.m)
+                .disabled(!canAddSet)
+                .buttonStyle(.plain)
             }
-            .padding(.vertical, Spacing.s)
-            .themedCard(cornerRadius: 18)
-            .offset(x: swipeOffset)
+            .padding(.horizontal, Spacing.m)
         }
-        .contentShape(Rectangle())
-        .onTapGesture {
-            focusedField = nil
-            if swipeOffset != 0 {
-                withAnimation(.interactiveSpring(response: 0.2, dampingFraction: 0.9, blendDuration: 0.12)) {
-                    swipeOffset = 0
-                }
-            }
-        }
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 16)
-                .onChanged { value in
-                    guard value.startLocation.y <= exerciseSwipeActivationHeight else { return }
-                    let horizontal = abs(value.translation.width)
-                    let vertical = abs(value.translation.height)
-                    if dragAxis == nil {
-                        if horizontal > exerciseHorizontalMinimum,
-                           horizontal > vertical * exerciseHorizontalThresholdRatio {
-                            dragAxis = .horizontal
-                        } else if vertical > 8, vertical > horizontal {
-                            dragAxis = .vertical
-                        }
-                    }
-                    guard dragAxis == .horizontal else { return }
-                    if value.translation.width < 0 {
-                        swipeOffset = max(-(deleteRevealWidth + exerciseDeleteGap), value.translation.width)
-                    } else if swipeOffset < 0 {
-                        swipeOffset = min(0, -(deleteRevealWidth + exerciseDeleteGap) + value.translation.width)
-                    }
-                }
-                .onEnded { value in
-                    defer { dragAxis = nil }
-                    guard value.startLocation.y <= exerciseSwipeActivationHeight else { return }
-                    let horizontal = abs(value.translation.width)
-                    let vertical = abs(value.translation.height)
-                    guard horizontal > exerciseHorizontalMinimum else { return }
-                    guard horizontal > vertical * exerciseHorizontalThresholdRatio else { return }
-                    withAnimation(.interactiveSpring(response: 0.2, dampingFraction: 0.88, blendDuration: 0.12)) {
-                        swipeOffset = value.translation.width < -((deleteRevealWidth + exerciseDeleteGap) * 0.5) ? -(deleteRevealWidth + exerciseDeleteGap) : 0
-                    }
-                }
-        )
+        .padding(.vertical, Spacing.s)
+        .themedCard(cornerRadius: 18)
         .onAppear {
             if let lastSet = exercise.sets.last {
                 weightText = WeightFormatter.format(lastSet.weight, unit: unitStore.unit)
                 repsText = "\(lastSet.reps)"
+            } else {
+                if weightText.isEmpty {
+                    weightText = "0"
+                }
+                if repsText.isEmpty {
+                    repsText = "\(defaultReps)"
+                }
             }
         }
     }
@@ -946,8 +1015,26 @@ struct MinimalExerciseCard: View {
         ExerciseDatabase.shared.getExercise(named: exercise.name)
     }
 
-    private var deleteRevealProgress: CGFloat {
-        min(max((-swipeOffset) / deleteRevealWidth, 0), 1)
+    private var visibleContributions: [ExerciseTargetContribution] {
+        Array(targetContributions.prefix(3))
+    }
+
+    private var completedSetCount: Int {
+        exercise.sets.filter { $0.completed }.count
+    }
+
+    private var defaultReps: Int {
+        guard let exercise = exerciseMetadata else { return 10 }
+        if exercise.focus == .mobility {
+            return 12
+        }
+        if exercise.isCompound {
+            return exercise.equipment == .bodyweight ? 12 : 8
+        }
+        if exercise.primaryMuscles.contains(.abs) {
+            return 15
+        }
+        return 12
     }
 
     private func addSet() {
@@ -1103,100 +1190,134 @@ struct MinimalSetRow: View {
     let set: ExerciseSet
     let onToggle: () -> Void
     let onDelete: () -> Void
-    @State private var swipeOffset: CGFloat = 0
-    @State private var dragAxis: SwipeAxis?
     @ObservedObject private var unitStore = UnitSettingsStore.shared
-    private let deleteRevealWidth: CGFloat = 84
-    private let setHorizontalThresholdRatio: CGFloat = 2.4
-    private let setHorizontalMinimum: CGFloat = 22
-    private enum SwipeAxis {
-        case horizontal
-        case vertical
-    }
 
     var body: some View {
-        ZStack(alignment: .trailing) {
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(Color.red.opacity(0.94))
-                .frame(width: deleteRevealWidth, height: 42)
-                .overlay {
-                    Image(systemName: "trash.fill")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(.white)
-                }
-                .opacity(deleteRevealProgress)
-                .onTapGesture {
-                    if deleteRevealProgress > 0.98 {
-                        HapticFeedback.warning.trigger()
-                        onDelete()
-                    }
-                }
+        HStack(spacing: Spacing.s) {
+            Button(action: onToggle) {
+                Image(systemName: set.completed ? "checkmark.square.fill" : "square")
+                    .font(.title)
+                    .foregroundColor(set.completed ? .spaceGlow : .white.opacity(0.45))
+            }
+            .buttonStyle(.plain)
 
-            HStack(spacing: Spacing.s) {
-                Button(action: onToggle) {
-                    Image(systemName: set.completed ? "checkmark.square.fill" : "square")
-                        .font(.title)
-                        .foregroundColor(set.completed ? .spaceGlow : .white.opacity(0.45))
-                }
+            Text("\(index)")
+                .font(.body)
+                .foregroundColor(.white.opacity(0.5))
+                .frame(width: 24)
 
-                Text("\(index)")
-                    .font(.body)
-                    .foregroundColor(.white.opacity(0.5))
-                    .frame(width: 24)
+            Text("\(WeightFormatter.format(set.weight, unit: unitStore.unit))\(unitStore.unit.symbol) × \(set.reps)")
+                .font(.body)
+                .foregroundColor(.white)
 
-                Text("\(WeightFormatter.format(set.weight, unit: unitStore.unit))\(unitStore.unit.symbol) × \(set.reps)")
-                    .font(.body)
+            Spacer()
+
+            Button {
+                HapticFeedback.warning.trigger()
+                onDelete()
+            } label: {
+                Image(systemName: "trash.fill")
+                    .font(.system(size: 13, weight: .semibold))
                     .foregroundColor(.white)
-
-                Spacer()
+                    .frame(width: 26, height: 26)
+                    .background(Color.red.opacity(0.9))
+                    .clipShape(Circle())
             }
-            .padding(.horizontal, Spacing.m)
-            .padding(.vertical, Spacing.xs)
-            .offset(x: swipeOffset)
+            .buttonStyle(.plain)
         }
-        .contentShape(Rectangle())
-        .onTapGesture {
-            if swipeOffset != 0 {
-                withAnimation(.interactiveSpring(response: 0.2, dampingFraction: 0.9, blendDuration: 0.12)) {
-                    swipeOffset = 0
-                }
-            }
-        }
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 16)
-                .onChanged { value in
-                    let horizontal = abs(value.translation.width)
-                    let vertical = abs(value.translation.height)
-                    if dragAxis == nil {
-                        if horizontal > setHorizontalMinimum,
-                           horizontal > vertical * setHorizontalThresholdRatio {
-                            dragAxis = .horizontal
-                        } else if vertical > 8, vertical > horizontal {
-                            dragAxis = .vertical
-                        }
-                    }
-                    guard dragAxis == .horizontal else { return }
-                    if value.translation.width < 0 {
-                        swipeOffset = max(-deleteRevealWidth, value.translation.width)
-                    } else if swipeOffset < 0 {
-                        swipeOffset = min(0, -deleteRevealWidth + value.translation.width)
-                    }
-                }
-                .onEnded { value in
-                    defer { dragAxis = nil }
-                    let horizontal = abs(value.translation.width)
-                    let vertical = abs(value.translation.height)
-                    guard horizontal > setHorizontalMinimum else { return }
-                    guard horizontal > vertical * setHorizontalThresholdRatio else { return }
-                    withAnimation(.interactiveSpring(response: 0.2, dampingFraction: 0.88, blendDuration: 0.12)) {
-                        swipeOffset = value.translation.width < -(deleteRevealWidth * 0.5) ? -deleteRevealWidth : 0
-                    }
-                }
+        .padding(.horizontal, Spacing.m)
+        .padding(.vertical, Spacing.xs)
+        .background(Color.white.opacity(0.06))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.white.opacity(0.08), lineWidth: 1)
         )
     }
+}
 
-    private var deleteRevealProgress: CGFloat {
-        min(max((-swipeOffset) / deleteRevealWidth, 0), 1)
+private struct ExerciseContributionRow: View {
+    let muscle: MuscleGroup
+    let completed: Double
+    let planned: Double
+    let valueText: String
+
+    var body: some View {
+        VStack(spacing: 6) {
+            HStack(spacing: 8) {
+                Image(systemName: muscle.symbolName)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(muscle.tint)
+                    .frame(width: 18, height: 18)
+
+                Text(muscle.shortName)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.white)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.95)
+
+                if let subtypeTag = muscle.subtypeTag {
+                    Text(subtypeTag)
+                        .font(.system(size: 9, weight: .black))
+                        .foregroundColor(muscle.tint)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
+                        .background(muscle.tint.opacity(0.16))
+                        .clipShape(Capsule())
+                }
+
+                Spacer(minLength: 8)
+
+                Text(valueText)
+                    .font(.system(size: 12, weight: .bold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.86))
+                    .monospacedDigit()
+            }
+
+            GeometryReader { geo in
+                Capsule()
+                    .fill(Color.white.opacity(0.14))
+                    .overlay(alignment: .leading) {
+                        Capsule()
+                            .fill(muscle.tint)
+                            .frame(width: max(4, geo.size.width * progress))
+                            .animation(.interactiveSpring(response: 0.25, dampingFraction: 0.86), value: progress)
+                    }
+            }
+            .frame(height: 5)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(Color.white.opacity(0.1))
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    private var progress: CGFloat {
+        guard planned > 0 else { return 0 }
+        return CGFloat(min(max(completed / planned, 0), 1))
+    }
+}
+
+private struct ExerciseCompletionBadge: View {
+    let completed: Int
+    let total: Int
+
+    var body: some View {
+        VStack(alignment: .trailing, spacing: 3) {
+            Text("\(completed)/\(max(total, 1))")
+                .font(.system(size: 14, weight: .bold, design: .rounded))
+                .foregroundColor(.white)
+                .monospacedDigit()
+
+            Text(total > 0 && completed >= total ? "CLEARED" : "SETS")
+                .font(.system(size: 9, weight: .black))
+                .foregroundColor(total > 0 && completed >= total ? .spaceGlow : .white.opacity(0.55))
+                .tracking(0.6)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(Color.white.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
     }
 }
 
