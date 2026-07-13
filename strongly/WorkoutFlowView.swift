@@ -22,11 +22,21 @@ struct ExerciseTargetContribution: Hashable {
     let plannedCredit: Double
 }
 
+struct ExerciseTrainingCue: Hashable {
+    let lastWeightLb: Double?
+    let lastReps: Int?
+    let targetWeightLb: Double
+    let targetReps: Int
+    let repRange: RepRange
+    let isProgression: Bool
+}
+
 struct WorkoutFlowView: View {
     let initialSession: WorkoutSession?
     let repository: WorkoutRepository
     let preloadedExercises: [ExerciseLog]
     let targetOverrides: [MuscleGroup: Double]
+    let setBudgetOverride: Int?
 
     @StateObject private var sessionViewModel: WorkoutSessionViewModel
     @StateObject private var restTimer = RestTimerViewModel()
@@ -39,17 +49,23 @@ struct WorkoutFlowView: View {
     @State private var celebrationMessage = ""
     @State private var showCancelAlert = false
     @State private var isCompleted = false
+    @State private var completedSession: WorkoutSession?
+    @State private var showDeferLeftoversAlert = false
+    @State private var pendingDeficits: [MuscleGroup: Double] = [:]
+    @State private var workoutHistory: [WorkoutSession] = []
 
     init(
         initialSession: WorkoutSession?,
         repository: WorkoutRepository,
         preloadedExercises: [ExerciseLog] = [],
-        targetOverrides: [MuscleGroup: Double] = [:]
+        targetOverrides: [MuscleGroup: Double] = [:],
+        setBudgetOverride: Int? = nil
     ) {
         self.initialSession = initialSession
         self.repository = repository
         self.preloadedExercises = preloadedExercises
         self.targetOverrides = targetOverrides
+        self.setBudgetOverride = setBudgetOverride
         self._sessionViewModel = StateObject(wrappedValue: WorkoutSessionViewModel(repository: repository))
     }
 
@@ -68,30 +84,10 @@ struct WorkoutFlowView: View {
     private var workoutView: some View {
         VStack(spacing: 0) {
             header
-            progressBar
-            Divider()
-
             workoutContent(sessionViewModel.currentSession ?? WorkoutSession(exercises: []))
-
-            Button {
-                showExercisePicker = true
-            } label: {
-                HStack {
-                    Image(systemName: "plus.circle.fill")
-                        .font(.title3)
-                    Text("Add Exercise")
-                }
-                .font(.body)
-                .fontWeight(.semibold)
-                .foregroundColor(.spaceNavy)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, Spacing.m)
-                .background(Color.spaceGlow)
-                .cornerRadius(14)
-            }
-            .padding(.horizontal, Spacing.m)
-            .padding(.bottom, Spacing.s)
-            .background(Color.clear)
+        }
+        .overlay(alignment: .bottomTrailing) {
+            addExerciseButton
         }
         .overlay(alignment: .bottom) {
             if showCelebration {
@@ -106,8 +102,11 @@ struct WorkoutFlowView: View {
                 }
                 .padding(.horizontal, 24)
                 .padding(.vertical, 16)
-                .background(Color.spaceGlow)
+                .background(Color.black.opacity(0.82))
                 .cornerRadius(24)
+                .overlay(
+                    AnimatedRainbowStroke(cornerRadius: 24, lineWidth: 1.4)
+                )
                 .shadow(radius: 10)
                 .padding(.bottom, 100)
                 .transition(.scale.combined(with: .opacity))
@@ -125,6 +124,9 @@ struct WorkoutFlowView: View {
                 }
             }
             restTimer.resume()
+            Task {
+                workoutHistory = (try? await repository.fetchAll()) ?? []
+            }
         }
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
@@ -159,128 +161,312 @@ struct WorkoutFlowView: View {
                 Text("Something went wrong")
             }
         }
+        .alert("Leftover Sets", isPresented: $showDeferLeftoversAlert) {
+            Button("Keep Training", role: .cancel) {}
+            Button("Defer & Finish") {
+                let deficits = pendingDeficits
+                pendingDeficits = [:]
+                planStore.deferLeftovers(deficits)
+                Task {
+                    await finalizeWorkout()
+                }
+            }
+        } message: {
+            Text(deferLeftoversMessage)
+        }
         .confirmationDialog("Replace Exercise", isPresented: .constant(false), titleVisibility: .visible) {
             Button("Cancel", role: .cancel) {}
         }
     }
 
+    private var addExerciseButton: some View {
+        Button {
+            showExercisePicker = true
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "plus")
+                    .font(.system(size: 14, weight: .bold))
+                Text("Add")
+                    .font(.system(size: 14, weight: .semibold))
+            }
+            .foregroundColor(.white)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .background(Color.black.opacity(0.82))
+            .clipShape(Capsule())
+            .overlay(
+                AnimatedRainbowStroke(cornerRadius: 999, lineWidth: 1.3)
+            )
+            .shadow(color: .black.opacity(0.24), radius: 11, y: 6)
+        }
+        .buttonStyle(.plain)
+        .padding(.trailing, Spacing.m)
+        .padding(.bottom, Spacing.m)
+    }
+
     private var header: some View {
-        HStack {
-            Button {
-                if let session = sessionViewModel.currentSession, !session.exercises.isEmpty {
-                    showCancelAlert = true
-                } else {
-                    sessionViewModel.cancelWorkout()
-                    dismiss()
-                }
-            } label: {
-                Text("Cancel")
-                    .font(.body)
-                    .foregroundColor(.graphite)
-            }
-            .frame(width: 60, alignment: .leading)
-
-            Spacer()
-
-            if restTimer.isActive {
-                HStack(spacing: 4) {
-                    Button {
-                        restTimer.adjustActiveTimer(by: -15)
-                    } label: {
-                        Image(systemName: "minus.circle.fill")
-                            .font(.body)
-                            .foregroundColor(.spaceGlow)
+        VStack(spacing: 8) {
+            HStack(spacing: 12) {
+                Button {
+                    if let session = sessionViewModel.currentSession, !session.exercises.isEmpty {
+                        showCancelAlert = true
+                    } else {
+                        sessionViewModel.cancelWorkout()
+                        dismiss()
                     }
-
-                    Button {
-                        restTimer.stopTimer()
-                    } label: {
-                        Text("\(restTimer.remainingTime)s")
-                            .font(.body)
-                            .foregroundColor(.spaceGlow)
-                            .monospacedDigit()
-                    }
-
-                    Button {
-                        restTimer.adjustActiveTimer(by: 15)
-                    } label: {
-                        Image(systemName: "plus.circle.fill")
-                            .font(.body)
-                            .foregroundColor(.spaceGlow)
-                    }
+                } label: {
+                    Text("Cancel")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.74))
                 }
-            } else if let session = sessionViewModel.currentSession {
-                Text("\(completedSets(session))/\(totalSets(session))")
-                    .font(.body)
-                    .foregroundColor(.graphite)
+                .buttonStyle(.plain)
+                .frame(width: headerSideWidth, alignment: .leading)
+
+                centerHeaderContent
+                    .frame(maxWidth: .infinity)
+
+                Button {
+                    Task {
+                        await completeWorkoutWithSummary()
+                    }
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "checkmark")
+                            .font(.system(size: 12, weight: .bold))
+                        Text("Finish")
+                            .font(.system(size: 14, weight: .semibold))
+                    }
+                    .foregroundColor(canComplete ? .white : .white.opacity(0.5))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
+                    .background(canComplete ? Color.black.opacity(0.62) : Color.clear)
+                    .overlay(
+                        ZStack {
+                            Capsule(style: .continuous)
+                                .stroke(Color.white.opacity(canComplete ? 0 : 0.2), lineWidth: 1)
+                            if canComplete {
+                                AnimatedRainbowStroke(cornerRadius: 999, lineWidth: 1)
+                            }
+                        }
+                    )
+                    .clipShape(Capsule(style: .continuous))
+                }
+                .buttonStyle(.plain)
+                .disabled(!canComplete || sessionViewModel.isSaving || sessionViewModel.isCompleting)
+                .frame(width: headerSideWidth, alignment: .trailing)
             }
 
-            Spacer()
-
-            Button {
-                Task {
-                    await completeWorkoutWithSummary()
-                }
-            } label: {
-                Text("Done")
-                    .font(.body)
-                    .fontWeight(.semibold)
-                    .foregroundColor(canComplete ? .ink : .ash)
-            }
-            .disabled(!canComplete || sessionViewModel.isSaving || sessionViewModel.isCompleting)
-            .frame(width: 60, alignment: .trailing)
-        }
-        .padding(.horizontal, Spacing.m)
-        .padding(.vertical, Spacing.s)
-        .background(Color.clear)
-    }
-
-    private var progressBar: some View {
-        GeometryReader { geometry in
-            ZStack(alignment: .leading) {
-                Rectangle()
-                    .fill(Color.white.opacity(0.25))
-                    .frame(height: 2)
-
-                Rectangle()
-                    .fill(Color.spaceGlow)
-                    .frame(width: geometry.size.width * progressWidth, height: 2)
-                    .animation(Motion.snap, value: progressWidth)
+            if let session = sessionViewModel.currentSession {
+                contractStrip(session: session)
             }
         }
-        .frame(height: 2)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 9)
+        .background(
+            RoundedRectangle(cornerRadius: PremiumLayout.sectionRadius - 4, style: .continuous)
+                .fill(Color.themedCard.opacity(0.94))
+                .overlay(
+                    RoundedRectangle(cornerRadius: PremiumLayout.sectionRadius - 4, style: .continuous)
+                        .stroke(
+                            Color.white.opacity(0.12),
+                            lineWidth: 1
+                        )
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: PremiumLayout.sectionRadius - 4, style: .continuous)
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    Color.white.opacity(0.03),
+                                    Color.clear
+                                ],
+                                startPoint: .top,
+                                endPoint: .center
+                            )
+                        )
+                        .clipShape(RoundedRectangle(cornerRadius: PremiumLayout.sectionRadius - 4, style: .continuous))
+                )
+                .shadow(color: .black.opacity(0.28), radius: 10, y: 6)
+        )
+        .padding(.horizontal, Layout.screenHorizontal)
+        .padding(.top, 4)
+        .padding(.bottom, 8)
     }
 
-    private var progressWidth: CGFloat {
-        guard let session = sessionViewModel.currentSession else { return 0 }
-        return progress(session)
+    private func contractStrip(session: WorkoutSession) -> some View {
+        let completed = completedSets(session)
+        let planned = plannedSetGoal(for: session)
+        let required = requiredSetGoal
+        let warning = contractWarning(session: session)
+
+        return VStack(spacing: 6) {
+            HStack(spacing: 6) {
+                contractPill(
+                    title: "Target",
+                    value: "\(required)",
+                    tint: warning ? .orange : .white.opacity(0.82)
+                )
+                contractPill(
+                    title: "Sets",
+                    value: "\(planned)",
+                    tint: .white.opacity(0.82)
+                )
+                contractPill(
+                    title: "Completed",
+                    value: "\(completed)",
+                    tint: warning ? .orange : .spaceGlow
+                )
+            }
+
+            if warning {
+                Button {
+                    fixPlanForContract(session: session)
+                } label: {
+                    Text("Add Missing Sets")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Color.orange.opacity(0.9))
+                        .clipShape(Capsule())
+                        .overlay(
+                            Capsule()
+                                .stroke(Color.white.opacity(0.16), lineWidth: 1)
+                        )
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: completed)
+        .animation(.easeInOut(duration: 0.2), value: warning)
+    }
+
+    private func contractPill(title: String, value: String, tint: Color) -> some View {
+        HStack(spacing: 5) {
+            Text(title)
+                .font(.system(size: 10, weight: .bold))
+                .foregroundColor(.white.opacity(0.58))
+                .lineLimit(1)
+            Text(value)
+                .font(.system(size: 11, weight: .bold))
+                .foregroundColor(tint)
+                .monospacedDigit()
+        }
+        .frame(maxWidth: .infinity, alignment: .center)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(Color.white.opacity(0.08))
+        .clipShape(Capsule())
+        .overlay(
+            Capsule()
+                .stroke(Color.white.opacity(0.12), lineWidth: 1)
+        )
+    }
+
+    @ViewBuilder
+    private var centerHeaderContent: some View {
+        if restTimer.isActive {
+            HStack(spacing: 6) {
+                timerAdjustButton(symbol: "minus") {
+                    restTimer.adjustActiveTimer(by: -15)
+                }
+
+                Text(restTimeDisplay)
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundColor(.white)
+                    .monospacedDigit()
+
+                timerAdjustButton(symbol: "plus") {
+                    restTimer.adjustActiveTimer(by: 15)
+                }
+
+                Button {
+                    restTimer.stopTimer()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.75))
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(
+                LinearGradient(
+                    colors: [Color.spaceGlow.opacity(0.2), Color.spacePanelInner.opacity(0.3)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
+            .clipShape(Capsule(style: .continuous))
+            .overlay(
+                Capsule(style: .continuous)
+                    .stroke(Color.spaceGlow.opacity(0.38), lineWidth: 1)
+            )
+        } else {
+            Text(compactProgressText)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(.white.opacity(0.7))
+                .lineLimit(1)
+        }
+    }
+
+    private func timerAdjustButton(symbol: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 11, weight: .bold))
+                .foregroundColor(.white.opacity(0.8))
+                .frame(width: 18, height: 18)
+                .background(Color.white.opacity(0.08))
+                .clipShape(Circle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var restTimeDisplay: String {
+        let minutes = restTimer.remainingTime / 60
+        let seconds = restTimer.remainingTime % 60
+        return String(format: "%d:%02d", minutes, seconds)
+    }
+
+    private var compactProgressText: String {
+        guard let session = sessionViewModel.currentSession else { return "0/0 sets" }
+        let remaining = setsLeftToPace(session)
+        return "\(remaining) sets left"
+    }
+
+    private var headerSideWidth: CGFloat {
+        86
     }
 
     private func workoutContent(_ session: WorkoutSession) -> some View {
-        let todayTargets = todayTargetSets
+        let todayTargets = todayTargetSets.filter { $0.value > 0 }
         let focusTargetMuscles = Set(todayTargets.keys)
         let focusProgress = focusProgress(for: session, targetMuscles: focusTargetMuscles)
-        let effectiveTargets = focusProgress.planned.filter { $0.value > 0 }
+        let effectiveTargets = todayTargets.isEmpty
+            ? focusProgress.planned.filter { $0.value > 0 }
+            : todayTargets
         let orderedFocusMuscles = effectiveTargets.keys.sorted { $0.displayName < $1.displayName }
         let completedWorkSets = completedSets(session)
-        let totalWorkSets = totalSets(session)
+        let remainingSets = setsLeftToPace(session)
+        let quotaGoal = plannedSetGoal(for: session)
 
         return List {
             if !orderedFocusMuscles.isEmpty {
                 VStack(alignment: .leading, spacing: 12) {
                     HStack(alignment: .center) {
-                        Text("Today’s Focus")
+                        Text("Today's Work")
                             .font(.system(size: 14, weight: .bold))
                             .foregroundColor(.white.opacity(0.85))
                         Spacer()
-                        Text("\(completedWorkSets) / \(totalWorkSets) work sets complete")
+                        Text("\(remainingSets) left")
                             .font(.system(size: 12, weight: .semibold))
                             .foregroundColor(.white.opacity(0.65))
                     }
 
                     GeometryReader { geo in
-                        let completion = totalWorkSets > 0
-                            ? min(Double(completedWorkSets) / Double(totalWorkSets), 1.0)
+                        let completion = quotaGoal > 0
+                            ? min(Double(completedWorkSets) / Double(quotaGoal), 1.0)
                             : 0
                         Capsule()
                             .fill(Color.white.opacity(0.14))
@@ -308,8 +494,8 @@ struct WorkoutFlowView: View {
                     }
                 }
                 .padding(Spacing.m)
-                .themedCard(cornerRadius: 18)
-                .listRowInsets(EdgeInsets(top: Spacing.m, leading: Spacing.m, bottom: Spacing.s, trailing: Spacing.m))
+                .themedCard(cornerRadius: 22)
+                .listRowInsets(EdgeInsets(top: Spacing.m, leading: Layout.screenHorizontal + 2, bottom: Spacing.s, trailing: Layout.screenHorizontal + 2))
                 .listRowSeparator(.hidden)
                 .listRowBackground(Color.clear)
             }
@@ -321,11 +507,11 @@ struct WorkoutFlowView: View {
                         .foregroundColor(.white.opacity(0.55))
 
                     VStack(spacing: Spacing.xs) {
-                        Text("Ready to start?")
+                        Text("Ready when you are")
                             .font(.title)
                             .foregroundColor(.white)
 
-                        Text("Add your first exercise below")
+                        Text("Add the first movement and start logging")
                             .font(.body)
                             .foregroundColor(.white.opacity(0.7))
                     }
@@ -333,8 +519,8 @@ struct WorkoutFlowView: View {
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, Spacing.xl)
-                .themedCard(cornerRadius: 18)
-                .listRowInsets(EdgeInsets(top: 0, leading: Spacing.m, bottom: Spacing.m, trailing: Spacing.m))
+                .themedCard(cornerRadius: 22)
+                .listRowInsets(EdgeInsets(top: 0, leading: Layout.screenHorizontal + 2, bottom: Spacing.m, trailing: Layout.screenHorizontal + 2))
                 .listRowSeparator(.hidden)
                 .listRowBackground(Color.clear)
             } else {
@@ -343,8 +529,9 @@ struct WorkoutFlowView: View {
                         exercise: exercise,
                         targetContributions: targetContributions(
                             for: exercise,
-                            targets: effectiveTargets.isEmpty ? todayTargets : effectiveTargets
+                            targets: effectiveTargets
                         ),
+                        trainingCue: trainingCue(for: exercise.name),
                         showDeleteButton: false,
                         onAddSet: { weight, reps in
                             sessionViewModel.addSet(to: exercise.id, weight: weight, reps: reps)
@@ -369,7 +556,7 @@ struct WorkoutFlowView: View {
                             sessionViewModel.deleteExercise(exerciseId: exercise.id)
                         }
                     )
-                    .listRowInsets(EdgeInsets(top: 0, leading: Spacing.m, bottom: Spacing.xs, trailing: Spacing.m))
+                    .listRowInsets(EdgeInsets(top: 0, leading: Layout.screenHorizontal + 2, bottom: Spacing.xs, trailing: Layout.screenHorizontal + 2))
                     .listRowSeparator(.hidden)
                     .listRowBackground(Color.clear)
                     .swipeActions(edge: .trailing, allowsFullSwipe: false) {
@@ -386,6 +573,9 @@ struct WorkoutFlowView: View {
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
         .scrollDismissesKeyboard(.immediately)
+        .safeAreaInset(edge: .bottom) {
+            Color.clear.frame(height: 84)
+        }
         .background(Color.clear)
     }
 
@@ -460,6 +650,47 @@ struct WorkoutFlowView: View {
                     plannedCredit: planned[muscle] ?? 0
                 )
             }
+    }
+
+    private func trainingCue(for exerciseName: String) -> ExerciseTrainingCue? {
+        guard let exercise = ExerciseDatabase.shared.getExercise(named: exerciseName) else { return nil }
+
+        let repRange = ProgressionEngine.repRange(for: exercise)
+        let suggestedWeight = ProgressionEngine.suggestedWeightLb(for: exerciseName, history: workoutHistory)
+        let lastSet = lastCompletedSet(for: exerciseName)
+
+        let targetReps: Int
+        let progressedWeight: Bool
+        if let lastSet {
+            progressedWeight = suggestedWeight > lastSet.weight
+            targetReps = progressedWeight
+                ? repRange.min
+                : min(max(lastSet.reps + 1, repRange.min), repRange.max)
+        } else {
+            progressedWeight = false
+            targetReps = ProgressionEngine.suggestedReps(for: exercise)
+        }
+
+        return ExerciseTrainingCue(
+            lastWeightLb: lastSet?.weight,
+            lastReps: lastSet?.reps,
+            targetWeightLb: suggestedWeight,
+            targetReps: targetReps,
+            repRange: repRange,
+            isProgression: progressedWeight || (lastSet.map { targetReps > $0.reps } ?? false)
+        )
+    }
+
+    private func lastCompletedSet(for exerciseName: String) -> ExerciseSet? {
+        for session in workoutHistory.sorted(by: { $0.date > $1.date }) {
+            guard let exercise = session.exercises.first(where: { $0.name.lowercased() == exerciseName.lowercased() }) else {
+                continue
+            }
+            if let set = exercise.sets.last(where: { $0.completed }) {
+                return set
+            }
+        }
+        return nil
     }
 
     private var restTimerOverlay: some View {
@@ -566,13 +797,99 @@ struct WorkoutFlowView: View {
     }
 
     private func progress(_ session: WorkoutSession) -> CGFloat {
-        let total = totalSets(session)
-        guard total > 0 else { return 0 }
-        return CGFloat(completedSets(session)) / CGFloat(total)
+        let goal = plannedSetGoal(for: session)
+        guard goal > 0 else { return 0 }
+        return CGFloat(min(Double(completedSets(session)) / Double(goal), 1))
+    }
+
+    private var requiredSetGoal: Int {
+        let targets = requiredTargetsForContract
+        guard !targets.isEmpty else { return 0 }
+        return planStore.requiredSetBudget(for: planStore.dayConfig(), targets: targets)
+    }
+
+    private func plannedSetGoal(for session: WorkoutSession) -> Int {
+        if let setBudgetOverride {
+            return max(setBudgetOverride, 0)
+        }
+        return requiredSetGoal
+    }
+
+    private func contractWarning(session: WorkoutSession) -> Bool {
+        totalSets(session) < plannedSetGoal(for: session)
+    }
+
+    private func setsLeftToPace(_ session: WorkoutSession) -> Int {
+        max(plannedSetGoal(for: session) - completedSets(session), 0)
+    }
+
+    private var requiredTargetsForContract: [MuscleGroup: Double] {
+        todayTargetSets.filter { $0.value > 0 }
+    }
+
+    private func plannedContractDeficits(for session: WorkoutSession) -> [MuscleGroup: Double] {
+        let targets = requiredTargetsForContract
+        guard !targets.isEmpty else { return [:] }
+        let plannedCredits = MuscleTracker.setCredits(for: session.exercises, completedOnly: false)
+        return MuscleTracker.deficits(required: targets, achieved: plannedCredits)
+    }
+
+    private func fixPlanForContract(session: WorkoutSession) {
+        guard !requiredTargetsForContract.isEmpty else { return }
+        var liveSession = session
+        let plannedGoal = plannedSetGoal(for: session)
+        guard totalSets(liveSession) < plannedGoal else { return }
+        var deficits = plannedContractDeficits(for: liveSession)
+
+        var safety = 0
+        while totalSets(liveSession) < plannedGoal && safety < 48 {
+            guard let exerciseId = bestExerciseForDeficit(deficits: deficits, exercises: liveSession.exercises)
+                    ?? liveSession.exercises.first?.id else {
+                break
+            }
+            let rawSeed = liveSession.exercises.first(where: { $0.id == exerciseId })?.sets.last
+                ?? ExerciseSet(weight: 0, reps: 10, completed: false)
+            let seedWeight = min(max(rawSeed.weight, 0), 1000)
+            let seedReps = min(max(rawSeed.reps, 1), 100)
+            sessionViewModel.addSet(to: exerciseId, weight: seedWeight, reps: seedReps)
+
+            guard let updated = sessionViewModel.currentSession else { break }
+            liveSession = updated
+            deficits = plannedContractDeficits(for: updated)
+            safety += 1
+        }
+
+        if totalSets(liveSession) >= plannedGoal {
+            HapticFeedback.success.trigger()
+        } else {
+            HapticFeedback.warning.trigger()
+        }
+    }
+
+    private func bestExerciseForDeficit(
+        deficits: [MuscleGroup: Double],
+        exercises: [ExerciseLog]
+    ) -> UUID? {
+        guard !exercises.isEmpty else { return nil }
+        return exercises
+            .compactMap { exercise -> (UUID, Double)? in
+                guard let metadata = ExerciseDatabase.shared.getExercise(named: exercise.name) else { return nil }
+                var score = 0.0
+                for muscle in metadata.primaryMuscles {
+                    score += deficits[muscle] ?? 0
+                }
+                for muscle in metadata.secondaryMuscles {
+                    score += (deficits[muscle] ?? 0) * TrainingTargets.secondaryMuscleCredit
+                }
+                guard score > 0 else { return nil }
+                return (exercise.id, score)
+            }
+            .max(by: { $0.1 < $1.1 })?
+            .0
     }
 
     private func showSetCelebration() {
-        celebrationMessage = ["Nice!", "Strong!", "Beast!", "Crushing it!", "Let's go!"].randomElement() ?? "Nice!"
+        celebrationMessage = ["Set logged", "Good set", "Work counted", "Keep going"].randomElement() ?? "Set logged"
         showCelebration = true
         HapticFeedback.light.trigger()
 
@@ -582,17 +899,28 @@ struct WorkoutFlowView: View {
     }
 
     private func showCompletionCelebration() {
-        celebrationMessage = "Workout Complete! 🎉"
+        celebrationMessage = "Workout complete"
         showCelebration = true
         HapticFeedback.success.trigger()
     }
 
     private func completeWorkoutWithSummary() async {
-        guard sessionViewModel.currentSession != nil else { return }
+        guard let session = sessionViewModel.currentSession else { return }
+        let deficits = planStore.completionDeficits(for: session)
+        if deficits.isEmpty {
+            await finalizeWorkout()
+            return
+        }
+        pendingDeficits = deficits
+        showDeferLeftoversAlert = true
+    }
 
+    private func finalizeWorkout() async {
+        guard let sessionBeforeSave = sessionViewModel.currentSession else { return }
+        completedSession = sessionBeforeSave
         restTimer.stopTimer()
         await sessionViewModel.completeWorkout()
-        planStore.advanceAfterWorkout()
+        planStore.advanceAfterWorkout(session: sessionBeforeSave)
 
         if sessionViewModel.error == nil {
             withAnimation(.spring(response: 0.6, dampingFraction: 0.8)) {
@@ -600,6 +928,16 @@ struct WorkoutFlowView: View {
             }
             HapticFeedback.success.trigger()
         }
+    }
+
+    private var deferLeftoversMessage: String {
+        guard !pendingDeficits.isEmpty else { return "Finish now and carry the remaining work into your next eligible session?" }
+        let items = pendingDeficits
+            .sorted { $0.key.displayName < $1.key.displayName }
+            .prefix(3)
+            .map { "\($0.key.displayName): \(formatSets($0.value))" }
+            .joined(separator: "\n")
+        return "Finish now and carry this work forward?\n\(items)"
     }
 
     private var canComplete: Bool {
@@ -669,71 +1007,149 @@ struct WorkoutFlowView: View {
             }
         }
 
-        return nil
+        return .workoutComplete
     }
 
     private var completionView: some View {
-        VStack(spacing: 0) {
-            Spacer()
+        ScrollView(showsIndicators: false) {
+            VStack(alignment: .leading, spacing: PremiumLayout.sectionSpacing) {
+                completionHero
 
-            Text("💪")
-                .font(.system(size: 80))
+                if let session = completedSession {
+                    completionStats(session)
+                    progressionSummary(session)
+                    nextSessionCard
+                }
 
-            Text("Workout Complete")
-                .font(.title)
+                Button {
+                    dismiss()
+                } label: {
+                    Text("Back to Today")
+                }
+                .buttonStyle(PrimaryButtonStyle())
+            }
+            .padding(.horizontal, Layout.screenHorizontal)
+            .padding(.top, 28)
+            .padding(.bottom, 28)
+        }
+    }
+
+    private var completionHero: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Work complete.")
+                .font(.system(size: 34, weight: .heavy))
                 .foregroundColor(.white)
-                .padding(.top, Spacing.m)
+            Text("Logged, saved, and folded into your next targets.")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundColor(.white.opacity(0.7))
+        }
+        .premiumSectionCard(cornerRadius: 24)
+    }
 
-            if let session = sessionViewModel.currentSession {
-                VStack(spacing: Spacing.s) {
-                    HStack(spacing: Spacing.xl) {
-                        VStack(spacing: 4) {
-                            Text("\(completedSets(session))")
-                                .font(.title)
-                                .foregroundColor(.white)
-                            Text("sets")
-                                .font(.detail)
-                                .foregroundColor(.graphite)
-                        }
+    private func completionStats(_ session: WorkoutSession) -> some View {
+        HStack(spacing: 8) {
+            completionStat(title: "Sets", value: "\(completedSets(session))")
+            completionStat(title: "Moves", value: "\(session.exercises.count)")
+            completionStat(title: "Volume", value: "\(Int(displayVolume(totalVolume(session))))")
+        }
+        .premiumSectionCard(cornerRadius: 22)
+    }
 
-                        VStack(spacing: 4) {
-                            Text("\(session.exercises.count)")
-                                .font(.title)
-                                .foregroundColor(.white)
-                            Text("exercises")
-                                .font(.detail)
-                                .foregroundColor(.graphite)
-                        }
+    private func completionStat(title: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title.uppercased())
+                .font(.system(size: 10, weight: .bold))
+                .foregroundColor(.white.opacity(0.55))
+            Text(value)
+                .font(.system(size: 22, weight: .bold))
+                .foregroundColor(.white)
+                .monospacedDigit()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 10)
+        .background(Color.white.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+    }
 
-                        VStack(spacing: 4) {
-                            Text("\(Int(displayVolume(totalVolume(session))))")
-                                .font(.title)
+    private func progressionSummary(_ session: WorkoutSession) -> some View {
+        let progressed = progressedExercises(in: session)
+        return VStack(alignment: .leading, spacing: 12) {
+            SectionLead(
+                title: progressed.isEmpty ? "Progress banked" : "Moved forward",
+                subtitle: progressed.isEmpty
+                    ? "This session still counted. Repeat the work and the targets will move when you earn them."
+                    : "These movements beat your previous completed set."
+            )
+
+            if progressed.isEmpty {
+                Text("This session counted. Your next targets now reflect the work you finished.")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.72))
+            } else {
+                VStack(spacing: 8) {
+                    ForEach(progressed.prefix(4), id: \.self) { name in
+                        HStack {
+                            Image(systemName: "arrow.up.right.circle.fill")
+                                .foregroundColor(.spaceGlow)
+                            Text(name)
+                                .font(.system(size: 14, weight: .semibold))
                                 .foregroundColor(.white)
-                            Text(unitStore.unit.symbol)
-                                .font(.detail)
-                                .foregroundColor(.graphite)
+                            Spacer()
+                            Text("beat last time")
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundColor(.white.opacity(0.58))
                         }
                     }
-                    .padding(.top, Spacing.l)
                 }
             }
-
-            Spacer()
-
-            Button {
-                dismiss()
-            } label: {
-                Text("Done")
-                    .font(.body)
-                    .fontWeight(.semibold)
-                    .foregroundColor(.spaceNavy)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, Spacing.m)
-                    .background(Color.spaceGlow)
-                    .cornerRadius(12)
-            }
-            .padding(Spacing.m)
         }
+        .premiumSectionCard(cornerRadius: 22)
+    }
+
+    private var nextSessionCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            SectionLead(
+                title: "Next",
+                subtitle: "Return to Today. Strongly will handle the next target."
+            )
+            Text("Recover tonight. Return to Today for the next target.")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(.white.opacity(0.72))
+        }
+        .premiumSectionCard(cornerRadius: 22)
+    }
+
+    private func progressedExercises(in session: WorkoutSession) -> [String] {
+        session.exercises.compactMap { exercise in
+            guard let bestCurrent = exercise.sets.filter({ $0.completed }).max(by: setPerformanceLessThan) else {
+                return nil
+            }
+            guard let previous = bestHistoricalSet(for: exercise.name, before: session.date) else {
+                return nil
+            }
+            return setPerformanceLessThan(previous, bestCurrent) ? exercise.name : nil
+        }
+    }
+
+    private func bestHistoricalSet(for exerciseName: String, before date: Date) -> ExerciseSet? {
+        workoutHistory
+            .filter { $0.date < date }
+            .flatMap { session in
+                session.exercises
+                    .filter { $0.name.lowercased() == exerciseName.lowercased() }
+                    .flatMap { $0.sets.filter(\.completed) }
+            }
+            .max(by: setPerformanceLessThan)
+    }
+
+    private func setPerformanceLessThan(_ lhs: ExerciseSet, _ rhs: ExerciseSet) -> Bool {
+        let lhsScore = lhs.weight * Double(lhs.reps)
+        let rhsScore = rhs.weight * Double(rhs.reps)
+        if lhsScore == rhsScore {
+            return lhs.reps < rhs.reps
+        }
+        return lhsScore < rhsScore
     }
 
     private func totalVolume(_ session: WorkoutSession) -> Double {
@@ -770,26 +1186,28 @@ struct TodayFocusProgressRow: View {
                 Capsule()
                     .fill(Color.white.opacity(0.14))
                     .frame(height: 6)
-                    .overlay(alignment: .leading) {
-                        GeometryReader { geo in
-                            Capsule()
-                                .fill(Color.white.opacity(0.3))
-                                .frame(
-                                    width: max(4, CGFloat(plannedRatio) * geo.size.width),
-                                    height: 6
-                                )
+                        .overlay(alignment: .leading) {
+                            GeometryReader { geo in
+                                Capsule()
+                                    .fill(Color.white.opacity(0.3))
+                                    .frame(
+                                        width: max(4, CGFloat(plannedRatio) * geo.size.width),
+                                        height: 6
+                                    )
+                                    .animation(.interactiveSpring(response: 0.24, dampingFraction: 0.86), value: plannedRatio)
+                            }
                         }
-                    }
-                    .overlay(alignment: .leading) {
-                        GeometryReader { geo in
-                            Capsule()
-                                .fill(muscle.tint)
-                                .frame(
-                                    width: max(4, CGFloat(completedRatio) * geo.size.width),
-                                    height: 6
-                                )
+                        .overlay(alignment: .leading) {
+                            GeometryReader { geo in
+                                Capsule()
+                                    .fill(muscle.tint)
+                                    .frame(
+                                        width: max(4, CGFloat(completedRatio) * geo.size.width),
+                                        height: 6
+                                    )
+                                    .animation(.interactiveSpring(response: 0.24, dampingFraction: 0.86), value: completedRatio)
+                            }
                         }
-                    }
 
                 Text("scheduled \(formatSets(scheduled))")
                     .font(.system(size: 11, weight: .semibold))
@@ -827,6 +1245,7 @@ struct TodayFocusProgressRow: View {
 struct MinimalExerciseCard: View {
     let exercise: ExerciseLog
     let targetContributions: [ExerciseTargetContribution]
+    let trainingCue: ExerciseTrainingCue?
     var showDeleteButton: Bool = true
     let onAddSet: (Double, Int) -> Void
     let onToggleSet: (UUID) -> Void
@@ -904,6 +1323,11 @@ struct MinimalExerciseCard: View {
                 }
             }
 
+            if let trainingCue {
+                trainingCueRow(trainingCue)
+                    .padding(.horizontal, Spacing.m)
+            }
+
             if !targetContributions.isEmpty {
                 VStack(spacing: 6) {
                     ForEach(visibleContributions, id: \.muscle) { contribution in
@@ -976,10 +1400,17 @@ struct MinimalExerciseCard: View {
                     Image(systemName: "plus")
                         .font(.body)
                         .fontWeight(.semibold)
-                        .foregroundColor(canAddSet ? .spaceNavy : .white.opacity(0.5))
+                        .foregroundColor(canAddSet ? .white : .white.opacity(0.5))
                         .frame(width: 32, height: 32)
-                        .background(canAddSet ? Color.spaceGlow : Color.white.opacity(0.18))
+                        .background(canAddSet ? Color.black.opacity(0.62) : Color.white.opacity(0.18))
                         .clipShape(Circle())
+                        .overlay(
+                            Group {
+                                if canAddSet {
+                                    AnimatedRainbowCircleStroke(lineWidth: 1.1)
+                                }
+                            }
+                        )
                 }
                 .disabled(!canAddSet)
                 .buttonStyle(.plain)
@@ -987,7 +1418,7 @@ struct MinimalExerciseCard: View {
             .padding(.horizontal, Spacing.m)
         }
         .padding(.vertical, Spacing.s)
-        .themedCard(cornerRadius: 18)
+        .themedCard(cornerRadius: 20)
         .onAppear {
             if let lastSet = exercise.sets.last {
                 weightText = WeightFormatter.format(lastSet.weight, unit: unitStore.unit)
@@ -1001,6 +1432,62 @@ struct MinimalExerciseCard: View {
                 }
             }
         }
+    }
+
+    private func trainingCueRow(_ cue: ExerciseTrainingCue) -> some View {
+        HStack(spacing: 8) {
+            cueBlock(
+                title: "Last time",
+                value: lastTimeText(for: cue),
+                tint: .white.opacity(0.78)
+            )
+            cueBlock(
+                title: "Try today",
+                value: targetText(for: cue),
+                tint: .spaceGlow
+            )
+            cueBlock(
+                title: "Range",
+                value: "\(cue.repRange.min)-\(cue.repRange.max)",
+                tint: .white.opacity(0.78)
+            )
+        }
+    }
+
+    private func cueBlock(title: String, value: String, tint: Color) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title.uppercased())
+                .font(.system(size: 8, weight: .bold))
+                .foregroundColor(.white.opacity(0.5))
+            Text(value)
+                .font(.system(size: 12, weight: .bold))
+                .foregroundColor(tint)
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 9)
+        .padding(.vertical, 8)
+        .background(Color.white.opacity(0.07))
+        .clipShape(RoundedRectangle(cornerRadius: 11, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 11, style: .continuous)
+                .stroke(Color.white.opacity(0.09), lineWidth: 1)
+        )
+    }
+
+    private func lastTimeText(for cue: ExerciseTrainingCue) -> String {
+        guard let weight = cue.lastWeightLb, let reps = cue.lastReps else {
+            return "First run"
+        }
+        return "\(WeightFormatter.format(weight, unit: unitStore.unit))\(unitStore.unit.symbol) x \(reps)"
+    }
+
+    private func targetText(for cue: ExerciseTrainingCue) -> String {
+        if cue.lastWeightLb == nil && cue.targetWeightLb == 0 {
+            return "Pick load x \(cue.targetReps)"
+        }
+        return "\(WeightFormatter.format(cue.targetWeightLb, unit: unitStore.unit))\(unitStore.unit.symbol) x \(cue.targetReps)"
     }
 
     private var canAddSet: Bool {
@@ -1099,11 +1586,14 @@ struct ExerciseDemoSheet: View {
                         HStack(spacing: 8) {
                             Text(exercise.focus.rawValue.capitalized)
                                 .font(.system(size: 12, weight: .semibold))
-                                .foregroundColor(.spaceNavy)
+                                .foregroundColor(.white)
                                 .padding(.horizontal, 10)
                                 .padding(.vertical, 6)
-                                .background(Color.spaceGlow)
+                                .background(Color.black.opacity(0.7))
                                 .clipShape(Capsule())
+                                .overlay(
+                                    AnimatedRainbowStroke(cornerRadius: 999, lineWidth: 1)
+                                )
 
                             Text(exercise.equipment.rawValue.capitalized)
                                 .font(.system(size: 12, weight: .semibold))

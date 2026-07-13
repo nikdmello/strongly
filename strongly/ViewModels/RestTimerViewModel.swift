@@ -10,13 +10,30 @@ struct RestTimerNextStep {
     let totalSets: Int
     let isSameExercise: Bool
 
+    static let workoutComplete = RestTimerNextStep(
+        exerciseName: "",
+        setNumber: 0,
+        totalSets: 0,
+        isSameExercise: false
+    )
+
+    var isWorkoutComplete: Bool {
+        exerciseName.isEmpty || totalSets <= 0
+    }
+
     var lockScreenLabel: String {
+        if isWorkoutComplete {
+            return "Today's work is complete."
+        }
         let prefix = isSameExercise ? "Next set" : "Next exercise"
         return "\(prefix): \(exerciseName) \(setNumber)/\(max(totalSets, 1))"
     }
 
     var notificationBody: String {
-        "Up next: \(exerciseName) set \(setNumber) of \(max(totalSets, 1))."
+        if isWorkoutComplete {
+            return "Rest complete. Today's work is done."
+        }
+        return "Up next: \(exerciseName) set \(setNumber) of \(max(totalSets, 1))."
     }
 }
 

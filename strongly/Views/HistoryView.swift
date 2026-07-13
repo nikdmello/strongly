@@ -5,7 +5,7 @@ struct HistoryView: View {
     @StateObject private var viewModel = HistoryViewModel()
 
     var body: some View {
-        NavigationView {
+        NavigationStack {
             ZStack {
                 StarfieldBackground()
 
@@ -14,7 +14,8 @@ struct HistoryView: View {
                         .tint(.spaceGlow)
                 } else {
                     ScrollView {
-                        LazyVStack(spacing: Space.m) {
+                        LazyVStack(spacing: PremiumLayout.sectionSpacing) {
+                            historyHero
                             WeeklyVolumeSection(sessions: viewModel.sessions)
 
                             if viewModel.sessions.isEmpty {
@@ -36,22 +37,18 @@ struct HistoryView: View {
                                         )
                                     } label: {
                                         Text("See All Workouts")
-                                            .font(.system(size: 14, weight: .semibold))
-                                            .foregroundColor(.spaceNavy)
                                             .frame(maxWidth: .infinity)
-                                            .padding(.vertical, 12)
-                                            .background(Color.spaceGlow)
-                                            .cornerRadius(12)
                                     }
-                                    .buttonStyle(.plain)
+                                    .buttonStyle(PrimaryButtonStyle())
                                 }
                             }
                         }
-                        .padding(Space.l)
+                        .padding(.horizontal, Layout.screenHorizontal)
+                        .padding(.vertical, Space.l)
                     }
                 }
             }
-            .navigationTitle("History")
+            .navigationTitle("Progress")
             .navigationBarTitleDisplayMode(.large)
         }
         .preferredColorScheme(.dark)
@@ -69,63 +66,164 @@ struct HistoryView: View {
         viewModel.sessions.first
     }
 
+    private var historyHero: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            SectionLead(
+                title: "Proof of the work",
+                subtitle: "Show up, finish hard sets, and repeat long enough for the trend to matter."
+            )
+
+            HStack(spacing: 10) {
+                historyStatPill(
+                    icon: "calendar.badge.clock",
+                    title: "This Week",
+                    value: "\(weekWorkoutCount)"
+                )
+                historyStatPill(
+                    icon: "flame.fill",
+                    title: "Streak",
+                    value: "\(workoutStreak)d"
+                )
+                historyStatPill(
+                    icon: "checkmark.circle.fill",
+                    title: "Sets",
+                    value: "\(allTimeCompletedSets)"
+                )
+            }
+        }
+        .premiumSectionCard()
+    }
+
+    private func historyStatPill(icon: String, title: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Image(systemName: icon)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundColor(.spaceGlow)
+            Text(value)
+                .font(.system(size: 18, weight: .bold))
+                .foregroundColor(.white)
+            Text(title)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(.white.opacity(0.62))
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(Color.white.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.white.opacity(0.14), lineWidth: 1)
+        )
+    }
+
+    private var weekWorkoutCount: Int {
+        let calendar = Calendar.current
+        let cutoff = calendar.date(byAdding: .day, value: -7, to: Date()) ?? Date.distantPast
+        return viewModel.sessions.filter { $0.date >= cutoff }.count
+    }
+
+    private var allTimeCompletedSets: Int {
+        viewModel.sessions.reduce(0) { partial, session in
+            partial + session.exercises.reduce(0) { exercisePartial, exercise in
+                exercisePartial + exercise.sets.filter { $0.completed }.count
+            }
+        }
+    }
+
+    private var workoutStreak: Int {
+        let calendar = Calendar.current
+        let uniqueDays = Set(viewModel.sessions.map { calendar.startOfDay(for: $0.date) })
+        guard !uniqueDays.isEmpty else { return 0 }
+
+        var streak = 0
+        var cursor = calendar.startOfDay(for: Date())
+        while uniqueDays.contains(cursor) {
+            streak += 1
+            guard let prior = calendar.date(byAdding: .day, value: -1, to: cursor) else { break }
+            cursor = prior
+        }
+        return streak
+    }
+
     private var emptyState: some View {
         VStack(spacing: Space.l) {
-            Text("💪")
-                .font(.system(size: 64))
+            ZStack {
+                Circle()
+                    .fill(Color.spaceGlow.opacity(0.14))
+                    .frame(width: 74, height: 74)
+                Image(systemName: "calendar.badge.plus")
+                    .font(.system(size: 30, weight: .semibold))
+                    .foregroundColor(.spaceGlow)
+            }
 
-            Text("No workouts yet")
+            Text("Your log starts here")
                 .font(.system(size: 24, weight: .bold))
                 .foregroundColor(.white)
 
-            Text("Start your first workout to see it here")
+            Text("Your completed workouts will appear here.")
                 .font(.system(size: 16))
                 .foregroundColor(.white.opacity(0.6))
                 .multilineTextAlignment(.center)
         }
-        .padding(Space.xl)
+        .premiumSectionCard(padding: Space.xl, cornerRadius: 20)
     }
 }
 
 struct WeeklyVolumeSection: View {
     let sessions: [WorkoutSession]
     @EnvironmentObject private var planStore: SplitPlanStore
+    @State private var showAllMuscles = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: Space.m) {
-            HStack {
-                Text("Weekly Volume")
-                    .font(.system(size: 18, weight: .bold))
-                    .foregroundColor(.white)
+            HStack(alignment: .top) {
+                SectionLead(
+                    title: "Enough Weekly Work",
+                    subtitle: "A simple check that the week is moving."
+                )
 
                 Spacer()
-
-                Button(planStore.weeklyVolumeResetDate == nil ? "Clear" : "Restore") {
-                    withAnimation(Motion.quick) {
-                        if planStore.weeklyVolumeResetDate == nil {
-                            planStore.clearWeeklyVolumeForTesting()
-                        } else {
-                            planStore.restoreWeeklyVolumeTracking()
-                        }
-                    }
-                }
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundColor(.white.opacity(0.85))
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(Color.white.opacity(0.12))
-                .clipShape(Capsule())
-                .buttonStyle(.plain)
             }
 
             VStack(spacing: Space.s) {
-                ForEach(MuscleGroup.allCases, id: \.self) { muscle in
+                ForEach(displayedMuscles, id: \.self) { muscle in
                     weeklyRow(for: muscle)
                 }
             }
+
+            if MuscleGroup.allCases.count > displayedMuscles.count {
+                Button {
+                    withAnimation(Motion.quick) {
+                        showAllMuscles.toggle()
+                    }
+                } label: {
+                    Text(showAllMuscles ? "Show less" : "Show full breakdown")
+                        .font(.system(size: 13, weight: .bold))
+                        .foregroundColor(.spaceGlow)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                        .background(Color.white.opacity(0.08))
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                }
+                .buttonStyle(.plain)
+            }
         }
-        .padding(Space.l)
-        .themedCard()
+        .premiumSectionCard()
+    }
+
+    private var displayedMuscles: [MuscleGroup] {
+        if showAllMuscles {
+            return MuscleGroup.allCases
+        }
+        return MuscleGroup.allCases
+            .sorted { lhs, rhs in
+                let lhsSets = normalizedVolumes[lhs]?.sets ?? 0
+                let rhsSets = normalizedVolumes[rhs]?.sets ?? 0
+                return lhsSets > rhsSets
+            }
+            .prefix(6)
+            .map { $0 }
     }
 
     private func weeklyRow(for muscle: MuscleGroup) -> some View {
@@ -221,8 +319,7 @@ struct WorkoutCard: View {
                 }
             }
         }
-        .padding(Space.l)
-        .themedCard()
+        .premiumSectionCard()
     }
 
     private func formatDuration(_ seconds: TimeInterval) -> String {
@@ -261,7 +358,7 @@ struct AllWorkoutsView: View {
                     ZStack {
                         WorkoutCard(session: session)
                     }
-                    .listRowInsets(EdgeInsets(top: 0, leading: Space.m, bottom: 12, trailing: Space.m))
+                    .listRowInsets(EdgeInsets(top: 0, leading: Layout.screenHorizontal, bottom: 12, trailing: Layout.screenHorizontal))
                     .listRowBackground(Color.clear)
                     .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                         Button(role: .destructive) {
@@ -277,7 +374,7 @@ struct AllWorkoutsView: View {
             .scrollContentBackground(.hidden)
             .background(Color.clear)
         }
-        .navigationTitle("All Workouts")
+        .navigationTitle("Workout Log")
         .navigationBarTitleDisplayMode(.inline)
         .preferredColorScheme(.dark)
     }

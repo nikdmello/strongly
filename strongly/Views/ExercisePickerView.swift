@@ -28,7 +28,6 @@ struct ExercisePickerView: View {
             VStack(spacing: 0) {
                 searchBar
                 filterSection
-                Divider()
                 resultsList
             }
             .background(StarfieldBackground())
@@ -93,7 +92,7 @@ struct ExercisePickerView: View {
             }
         }
         .padding(Spacing.m)
-        .themedCard(cornerRadius: 12)
+        .themedCard(cornerRadius: 14)
         .padding(.horizontal, Spacing.l)
         .padding(.vertical, Spacing.m)
     }
@@ -130,7 +129,7 @@ struct ExercisePickerView: View {
 
     private var resultsList: some View {
         ScrollView {
-            LazyVStack(spacing: 0) {
+            LazyVStack(spacing: Spacing.s) {
 
                 if !recentExercises.isEmpty && searchText.isEmpty {
                     VStack(alignment: .leading, spacing: Spacing.s) {
@@ -145,15 +144,8 @@ struct ExercisePickerView: View {
                                 onSelect(exercise)
                                 dismiss()
                             }
-
-                            if exercise.id != recentExercises.last?.id {
-                                Divider()
-                                    .padding(.leading, Spacing.l)
-                            }
                         }
-
-                        Divider()
-                            .padding(.vertical, Spacing.m)
+                        .padding(.bottom, Spacing.s)
 
                         Text("ALL EXERCISES")
                             .font(.micro)
@@ -167,13 +159,9 @@ struct ExercisePickerView: View {
                         onSelect(exercise)
                         dismiss()
                     }
-
-                    if exercise.id != filteredExercises.last?.id {
-                        Divider()
-                            .padding(.leading, Spacing.l)
-                    }
                 }
             }
+            .padding(.bottom, Spacing.l)
         }
     }
 }
@@ -218,11 +206,12 @@ struct ExerciseRow: View {
                     .background(Color.white.opacity(0.14))
                     .cornerRadius(6)
             }
-            .padding(.horizontal, Spacing.l)
+            .padding(.horizontal, Spacing.m)
             .padding(.vertical, Spacing.m)
             .themedCard(cornerRadius: 14)
         }
         .buttonStyle(.plain)
+        .padding(.horizontal, Spacing.l)
     }
 }
 
@@ -240,11 +229,20 @@ struct FilterChip: View {
                 Text(title)
                     .font(.callout)
             }
-            .foregroundColor(isSelected ? .spaceNavy : .white)
+            .foregroundColor(.white)
             .padding(.horizontal, Spacing.m)
             .padding(.vertical, Spacing.s)
-            .background(isSelected ? Color.spaceGlow : Color.white.opacity(0.14))
+            .background(isSelected ? Color.black.opacity(0.58) : Color.white.opacity(0.14))
             .cornerRadius(20)
+            .overlay(
+                ZStack {
+                    Capsule(style: .continuous)
+                        .stroke(Color.white.opacity(isSelected ? 0 : 0.16), lineWidth: 1.2)
+                    if isSelected {
+                        AnimatedRainbowStroke(cornerRadius: 999, lineWidth: 1.2)
+                    }
+                }
+            )
         }
     }
 }

@@ -1,11 +1,13 @@
 import SwiftUI
 
 struct LoadingView: View {
-    @State private var stars: [Star] = []
+    var onComplete: () -> Void = {}
     @State private var showMainApp = false
     @State private var transitionProgress: CGFloat = 0
     @State private var promptVisible = false
     @State private var hasHandledTap = false
+    @State private var logoPulse = false
+    @State private var heroRise = false
 
     var body: some View {
         ZStack {
@@ -23,92 +25,80 @@ struct LoadingView: View {
         }
         .animation(.easeInOut(duration: 0.55), value: transitionProgress)
         .onAppear {
-            generateStars()
-            animateStars()
             withAnimation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true)) {
                 promptVisible = true
             }
-        }
-        .onTapGesture {
-            transitionToMainApp()
+            withAnimation(.easeInOut(duration: 2.1).repeatForever(autoreverses: true)) {
+                logoPulse = true
+            }
+            withAnimation(.spring(response: 0.75, dampingFraction: 0.86)) {
+                heroRise = true
+            }
         }
     }
 
     private var welcomeLayer: some View {
         ZStack {
-            LinearGradient(
-                colors: [Color(hexString: "0a0e27"), Color(hexString: "1a1f3a"), Color(hexString: "0a0e27")],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .ignoresSafeArea()
+            StarfieldBackground()
+                .ignoresSafeArea()
 
-            ForEach(stars) { star in
-                Circle()
-                    .fill(Color.white.opacity(star.opacity))
-                    .frame(width: star.size, height: star.size)
-                    .blur(radius: star.blur)
-                    .position(star.position)
+            Button {
+                transitionToMainApp()
+            } label: {
+                Color.clear
+                    .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
+            .disabled(showMainApp)
+            .accessibilityLabel("Begin")
+            .ignoresSafeArea()
 
             VStack {
                 Spacer()
 
-                Image("StronglyIcon")
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: 140, height: 140)
-                    .shadow(color: .white.opacity(0.25), radius: 20)
-                    .padding(.bottom, 16)
+                VStack(spacing: 14) {
+                    Image("StronglyIcon")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 122, height: 122)
+                        .shadow(color: .black.opacity(0.34), radius: 18, y: 10)
+                        .scaleEffect(logoPulse ? 1.03 : 0.985)
 
-                Text("STRONGLY")
-                    .font(.system(size: 48, weight: .black))
-                    .foregroundColor(.white)
-                    .tracking(6)
-                    .shadow(color: .white.opacity(0.5), radius: 20)
+                    Text("STRONGLY")
+                        .font(.system(size: 44, weight: .black))
+                        .foregroundColor(.white)
+                        .tracking(3)
+                }
+                .offset(y: heroRise ? 0 : 18)
+                .opacity(heroRise ? 1 : 0.5)
 
                 Spacer()
 
-                Text("TAP ANYWHERE")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundColor(.white.opacity(0.6))
-                    .tracking(2)
-                    .padding(.bottom, 60)
-                    .opacity(promptVisible ? 1 : 0.35)
+                Button {
+                    transitionToMainApp()
+                } label: {
+                    Text("Tap anywhere to begin")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.7))
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 10)
+                        .background(Color.white.opacity(0.1))
+                        .clipShape(Capsule())
+                }
+                .buttonStyle(.plain)
+                .disabled(showMainApp)
+                .padding(.bottom, 54)
+                .opacity(promptVisible ? 1 : 0.35)
             }
+            .padding(.horizontal, 28)
+            .allowsHitTesting(!showMainApp)
         }
-    }
-
-    private func generateStars() {
-        stars = (0..<50).map { _ in
-            Star(
-                position: CGPoint(
-                    x: CGFloat.random(in: 0...400),
-                    y: CGFloat.random(in: 0...800)
-                ),
-                size: CGFloat.random(in: 1...3),
-                opacity: Double.random(in: 0.3...0.9),
-                blur: CGFloat.random(in: 0...1),
-                velocity: CGPoint(
-                    x: CGFloat.random(in: -0.5...0.5),
-                    y: CGFloat.random(in: -0.5...0.5)
-                )
-            )
-        }
-    }
-
-    private func animateStars() {
-        Timer.scheduledTimer(withTimeInterval: 0.016, repeats: true) { _ in
-            for i in stars.indices {
-                stars[i].position.x += stars[i].velocity.x
-                stars[i].position.y += stars[i].velocity.y
-
-                if stars[i].position.x < 0 { stars[i].position.x = 400 }
-                if stars[i].position.x > 400 { stars[i].position.x = 0 }
-                if stars[i].position.y < 0 { stars[i].position.y = 800 }
-                if stars[i].position.y > 800 { stars[i].position.y = 0 }
+        .contentShape(Rectangle())
+        .simultaneousGesture(
+            TapGesture().onEnded {
+                transitionToMainApp()
             }
-        }
+        )
     }
 
     private func transitionToMainApp() {
@@ -116,17 +106,11 @@ struct LoadingView: View {
         hasHandledTap = true
         HapticFeedback.heavy.trigger()
         showMainApp = true
-        withAnimation(.easeInOut(duration: 0.62)) {
+        withAnimation(.easeInOut(duration: 0.52)) {
             transitionProgress = 1
         }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.52) {
+            onComplete()
+        }
     }
-}
-
-struct Star: Identifiable {
-    let id = UUID()
-    var position: CGPoint
-    let size: CGFloat
-    var opacity: Double
-    let blur: CGFloat
-    let velocity: CGPoint
 }

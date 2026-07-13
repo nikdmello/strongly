@@ -62,7 +62,7 @@ final class UnitSettingsStore: ObservableObject {
     }
 }
 
-struct RepRange {
+struct RepRange: Hashable {
     let min: Int
     let max: Int
 }

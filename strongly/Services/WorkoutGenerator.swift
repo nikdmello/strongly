@@ -16,6 +16,7 @@ struct WorkoutRequest {
     let duration: Int
     let targetMuscles: [MuscleGroup]
     let equipment: EquipmentType
+    let allowedEquipment: Set<Equipment>?
     let focus: WorkoutFocus
     let preferredExercises: [String]
 }
@@ -145,7 +146,7 @@ class WorkoutGenerator {
             return GeneratedWorkout(
                 exercises: [],
                 estimatedDuration: 0,
-                reasoning: "No exercises available for selected equipment. Try 'Both' or add more exercises to database."
+                reasoning: "Selected equipment needs more exercises. Try 'Both' or add more exercises to the database."
             )
         }
 
@@ -212,11 +213,16 @@ class WorkoutGenerator {
         var scored: [ExerciseScore] = []
 
         for exercise in ExerciseDatabase.shared.exercises {
+            guard exercise.isProgressiveHypertrophyCandidate else { continue }
 
             if request.equipment == .bodyweight && exercise.equipment != .bodyweight {
                 continue
             }
             if request.equipment == .gym && exercise.equipment == .bodyweight {
+                continue
+            }
+            if let allowedEquipment = request.allowedEquipment,
+               !allowedEquipment.contains(exercise.equipment) {
                 continue
             }
 
@@ -291,13 +297,10 @@ class WorkoutGenerator {
         switch focus {
         case .strength:
             if exercise.focus == .strength {
-                return (12, "Strength priority")
+                return (12, "Hypertrophy priority")
             }
             return (-8, nil)
         case .balanced:
-            if exercise.focus == .mobility {
-                return (8, "Adds mobility work")
-            }
             return (6, nil)
         case .mobility:
             var score = 0.0
@@ -460,25 +463,7 @@ class WorkoutGenerator {
         maxExercises: Int,
         request: WorkoutRequest
     ) -> [ExerciseScore] {
-        guard request.focus != .strength else { return selected }
-        if selected.contains(where: { $0.exercise.focus == .mobility }) {
-            return selected
-        }
-
-        guard let mobilityCandidate = candidates.first(where: { candidate in
-            candidate.exercise.focus == .mobility &&
-            !selected.contains(where: { existing in existing.exercise.id == candidate.exercise.id })
-        }) else {
-            return selected
-        }
-
-        var updated = selected
-        if updated.count < maxExercises {
-            updated.append(mobilityCandidate)
-        } else if !updated.isEmpty {
-            updated[updated.count - 1] = mobilityCandidate
-        }
-        return updated
+        selected
     }
 
     private func ensureEquipmentMix(
@@ -642,11 +627,11 @@ class WorkoutGenerator {
 
         switch request.focus {
         case .strength:
-            parts.append("🏋️ Strength session")
+            parts.append("🏋️ Hypertrophy session")
         case .balanced:
-            parts.append("⚖️ Balanced strength + mobility")
+            parts.append("⚖️ Hypertrophy session")
         case .mobility:
-            parts.append("🧘 Mobility and control session")
+            parts.append("🏋️ Hypertrophy session")
         }
 
         let targetMuscles = Set(selected.flatMap { $0.exercise.primaryMuscles })

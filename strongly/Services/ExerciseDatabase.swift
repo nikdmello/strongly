@@ -33,6 +33,21 @@ struct Exercise: Identifiable, Codable {
     }
 }
 
+extension Exercise {
+    var isProgressiveHypertrophyCandidate: Bool {
+        guard focus == .strength else { return false }
+
+        switch equipment {
+        case .barbell, .dumbbell, .cable, .machine:
+            return true
+        case .bodyweight:
+            return name == "Pull-ups"
+        case .band:
+            return false
+        }
+    }
+}
+
 final class ExerciseDatabase {
     static let shared = ExerciseDatabase()
 
@@ -40,9 +55,14 @@ final class ExerciseDatabase {
 
         Exercise(name: "Bench Press", primaryMuscles: [.chestLower], secondaryMuscles: [.triceps, .shoulderFront], equipment: .barbell, isCompound: true),
         Exercise(name: "Incline Bench Press", primaryMuscles: [.chestUpper], secondaryMuscles: [.shoulderFront, .triceps], equipment: .barbell, isCompound: true),
+        Exercise(name: "Smith Machine Bench Press", primaryMuscles: [.chestLower], secondaryMuscles: [.triceps, .shoulderFront], equipment: .machine, isCompound: true),
+        Exercise(name: "Smith Machine Incline Press", primaryMuscles: [.chestUpper], secondaryMuscles: [.shoulderFront, .triceps], equipment: .machine, isCompound: true),
+        Exercise(name: "Chest Press Machine", primaryMuscles: [.chestLower], secondaryMuscles: [.triceps, .shoulderFront], equipment: .machine, isCompound: true),
         Exercise(name: "Dumbbell Press", primaryMuscles: [.chestLower], secondaryMuscles: [.triceps, .shoulderFront], equipment: .dumbbell, isCompound: true),
         Exercise(name: "Incline Dumbbell Press", primaryMuscles: [.chestUpper], secondaryMuscles: [.shoulderFront, .triceps], equipment: .dumbbell, isCompound: true),
         Exercise(name: "Push-ups", primaryMuscles: [.chestLower], secondaryMuscles: [.triceps, .shoulderFront], equipment: .bodyweight, isCompound: true, difficulty: .beginner),
+        Exercise(name: "Pec Deck", primaryMuscles: [.chestLower], equipment: .machine, isCompound: false),
+        Exercise(name: "Cable Crossover", primaryMuscles: [.chestLower], equipment: .cable, isCompound: false),
         Exercise(name: "Cable Fly", primaryMuscles: [.chestLower], equipment: .cable, isCompound: false),
         Exercise(name: "Dumbbell Fly", primaryMuscles: [.chestLower], equipment: .dumbbell, isCompound: false),
 
@@ -52,11 +72,14 @@ final class ExerciseDatabase {
         Exercise(name: "Lat Pulldown", primaryMuscles: [.backWidth], secondaryMuscles: [.biceps], equipment: .cable, isCompound: true),
         Exercise(name: "Dumbbell Row", primaryMuscles: [.backThickness], secondaryMuscles: [.biceps], equipment: .dumbbell, isCompound: true),
         Exercise(name: "Seated Cable Row", primaryMuscles: [.backThickness], secondaryMuscles: [.biceps], equipment: .cable, isCompound: true),
+        Exercise(name: "Machine Row", primaryMuscles: [.backThickness], secondaryMuscles: [.biceps], equipment: .machine, isCompound: true),
         Exercise(name: "T-Bar Row", primaryMuscles: [.backThickness], secondaryMuscles: [.biceps], equipment: .barbell, isCompound: true),
 
         Exercise(name: "Overhead Press", primaryMuscles: [.shoulderFront], secondaryMuscles: [.shoulderSide, .triceps], equipment: .barbell, isCompound: true),
         Exercise(name: "Dumbbell Shoulder Press", primaryMuscles: [.shoulderFront], secondaryMuscles: [.shoulderSide, .triceps], equipment: .dumbbell, isCompound: true),
+        Exercise(name: "Shoulder Press Machine", primaryMuscles: [.shoulderFront], secondaryMuscles: [.shoulderSide, .triceps], equipment: .machine, isCompound: true),
         Exercise(name: "Lateral Raise", primaryMuscles: [.shoulderSide], equipment: .dumbbell, isCompound: false),
+        Exercise(name: "Cable Lateral Raise", primaryMuscles: [.shoulderSide], equipment: .cable, isCompound: false),
         Exercise(name: "Front Raise", primaryMuscles: [.shoulderFront], equipment: .dumbbell, isCompound: false),
         Exercise(name: "Face Pull", primaryMuscles: [.shoulderRear], secondaryMuscles: [.backThickness], equipment: .cable, isCompound: false),
         Exercise(name: "Arnold Press", primaryMuscles: [.shoulderFront], secondaryMuscles: [.shoulderSide, .triceps], equipment: .dumbbell, isCompound: true),
@@ -72,6 +95,8 @@ final class ExerciseDatabase {
 
         Exercise(name: "Squat", primaryMuscles: [.quads], secondaryMuscles: [.glutes, .abs], equipment: .barbell, isCompound: true),
         Exercise(name: "Front Squat", primaryMuscles: [.quads], secondaryMuscles: [.glutes, .abs], equipment: .barbell, isCompound: true, difficulty: .advanced),
+        Exercise(name: "Smith Machine Squat", primaryMuscles: [.quads], secondaryMuscles: [.glutes, .abs], equipment: .machine, isCompound: true),
+        Exercise(name: "Smith Machine Romanian Deadlift", primaryMuscles: [.hamstrings, .glutes], secondaryMuscles: [.backThickness], equipment: .machine, isCompound: true),
         Exercise(name: "Leg Press", primaryMuscles: [.quads], secondaryMuscles: [.glutes], equipment: .machine, isCompound: true),
         Exercise(name: "Romanian Deadlift", primaryMuscles: [.hamstrings, .glutes], secondaryMuscles: [.backThickness], equipment: .barbell, isCompound: true),
         Exercise(name: "Leg Curl", primaryMuscles: [.hamstrings], equipment: .machine, isCompound: false),

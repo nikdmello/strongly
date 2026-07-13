@@ -7,20 +7,23 @@ struct SplitBuilderView: View {
     @State private var editingDay: SplitDayConfig?
 
     var body: some View {
-        NavigationView {
+        NavigationStack {
             ZStack {
                 StarfieldBackground()
 
                 ScrollView {
-                    VStack(spacing: Space.l) {
+                    VStack(spacing: PremiumLayout.sectionSpacing) {
+                        settingsPrincipleCard
+                        planOverview
                         planControls
                         targetSection
                         scheduleSection
                     }
-                    .padding(Space.l)
+                    .padding(.horizontal, Layout.screenHorizontal)
+                    .padding(.vertical, Space.l)
                 }
             }
-            .navigationTitle("Split Builder")
+            .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.large)
             .sheet(item: $editingDay) { day in
                 DayTargetEditorView(
@@ -34,18 +37,69 @@ struct SplitBuilderView: View {
         .preferredColorScheme(.dark)
     }
 
+    private var planOverview: some View {
+        HStack(spacing: 10) {
+            overviewChip(
+                title: "Days",
+                value: "\(store.plan.trainingDays)"
+            )
+            overviewChip(
+                title: "Split",
+                value: store.plan.splitType.shortLabel
+            )
+            overviewChip(
+                title: "Units",
+                value: unitStore.unit == .lb ? "LB" : "KG"
+            )
+        }
+        .premiumSectionCard(cornerRadius: 22)
+    }
+
+    private var settingsPrincipleCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            SectionLead(
+                title: "Set it. Repeat it.",
+                subtitle: "This is where constraints live. Your day-to-day work stays on Today."
+            )
+
+            Text("Change the plan when your schedule, equipment, or recovery changes.")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(.white.opacity(0.76))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .premiumSectionCard(cornerRadius: 22)
+    }
+
+    private func overviewChip(title: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title.uppercased())
+                .font(.system(size: 10, weight: .bold))
+                .foregroundColor(.white.opacity(0.58))
+                .tracking(0.8)
+            Text(value)
+                .font(.system(size: 18, weight: .bold))
+                .foregroundColor(.white)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(Color.white.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.white.opacity(0.14), lineWidth: 1)
+        )
+    }
+
     private var planControls: some View {
         VStack(alignment: .leading, spacing: Space.m) {
-            Text("Plan Setup")
-                .font(.system(size: 20, weight: .bold))
-                .foregroundColor(.white)
-
-            Text("Set your split once. Training adapts automatically day-to-day.")
-                .font(.system(size: 13, weight: .medium))
-                .foregroundColor(.white.opacity(0.65))
+            SectionLead(
+                title: "Training Constraints",
+                subtitle: "Pick the week you can actually repeat."
+            )
 
             VStack(alignment: .leading, spacing: Space.s) {
-                Text("Training Days")
+                Text("Training Rhythm")
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundColor(.white.opacity(0.6))
 
@@ -54,20 +108,26 @@ struct SplitBuilderView: View {
                         Button {
                             store.applyTemplate(trainingDays: days, splitType: store.plan.splitType)
                         } label: {
-                            Text("\(days) days")
-                                .font(.system(size: 13, weight: .bold))
-                                .foregroundColor(store.plan.trainingDays == days ? .spaceNavy : .white)
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 10)
-                                .background(store.plan.trainingDays == days ? Color.spaceGlow : Color.white.opacity(0.1))
-                                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                        .stroke(
-                                            store.plan.trainingDays == days ? Color.spaceGlow.opacity(0.9) : Color.white.opacity(0.15),
-                                            lineWidth: 1
-                                        )
-                                )
+                            VStack(spacing: 4) {
+                                Text("\(days)")
+                                    .font(.system(size: 18, weight: .bold))
+                                Text("days")
+                                    .font(.system(size: 11, weight: .semibold))
+                            }
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 13)
+                            .background(store.plan.trainingDays == days ? Color.black.opacity(0.48) : Color.white.opacity(0.1))
+                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            .overlay(
+                                ZStack {
+                                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                        .stroke(Color.white.opacity(store.plan.trainingDays == days ? 0.28 : 0.16), lineWidth: 1)
+                                    if store.plan.trainingDays == days {
+                                        AnimatedRainbowStroke(cornerRadius: 14, lineWidth: 1.4)
+                                    }
+                                }
+                            )
                         }
                         .buttonStyle(.plain)
                     }
@@ -75,7 +135,7 @@ struct SplitBuilderView: View {
             }
 
             VStack(alignment: .leading, spacing: Space.s) {
-                Text("Split Type")
+                Text("Simple Split")
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundColor(.white.opacity(0.6))
 
@@ -96,32 +156,34 @@ struct SplitBuilderView: View {
                                     Text(split.shortLabel)
                                         .font(.system(size: 13, weight: .bold))
                                         .lineLimit(1)
-                                        .minimumScaleFactor(0.85)
+                                        .minimumScaleFactor(0.82)
                                 }
-                                .foregroundColor(store.plan.splitType == split ? .spaceNavy : .white)
+                                .foregroundColor(.white)
 
                                 Text(splitDescription(for: split))
                                     .font(.system(size: 11, weight: .medium))
-                                    .foregroundColor(store.plan.splitType == split ? .spaceNavy.opacity(0.85) : .white.opacity(0.66))
+                                    .foregroundColor(store.plan.splitType == split ? .white.opacity(0.86) : .white.opacity(0.66))
                                     .multilineTextAlignment(.leading)
                                     .lineLimit(2)
 
-                                Text("Best for most beginners")
+                                Text("Recommended")
                                     .font(.system(size: 10, weight: .bold))
-                                    .foregroundColor(store.plan.splitType == split ? .spaceNavy.opacity(0.9) : .spaceGlow)
+                                    .foregroundColor(split == recommended ? .white : .white.opacity(0.58))
                                     .opacity(split == recommended ? 1 : 0)
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .frame(height: 90, alignment: .topLeading)
-                            .padding(10)
-                            .background(store.plan.splitType == split ? Color.spaceGlow : Color.white.opacity(0.09))
-                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                            .frame(minHeight: 106, alignment: .topLeading)
+                            .padding(12)
+                            .background(store.plan.splitType == split ? Color.black.opacity(0.48) : Color.white.opacity(0.09))
+                            .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                             .overlay(
-                                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                                    .stroke(
-                                        store.plan.splitType == split ? Color.spaceGlow.opacity(0.9) : Color.white.opacity(0.12),
-                                        lineWidth: 1
-                                    )
+                                ZStack {
+                                    RoundedRectangle(cornerRadius: 14, style: .continuous)
+                                        .stroke(Color.white.opacity(store.plan.splitType == split ? 0.26 : 0.14), lineWidth: 1)
+                                    if store.plan.splitType == split {
+                                        AnimatedRainbowStroke(cornerRadius: 14, lineWidth: 1.4)
+                                    }
+                                }
                             )
                         }
                         .buttonStyle(.plain)
@@ -140,8 +202,7 @@ struct SplitBuilderView: View {
                 }
             }
         }
-        .padding(Space.l)
-        .themedCard()
+        .premiumSectionCard()
     }
 
     private func unitOptionButton(label: String, unit: WeightUnit) -> some View {
@@ -150,17 +211,19 @@ struct SplitBuilderView: View {
         } label: {
             Text(label.uppercased())
                 .font(.system(size: 13, weight: .bold))
-                .foregroundColor(unitStore.unit == unit ? .spaceNavy : .white)
+                .foregroundColor(.white)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 10)
-                .background(unitStore.unit == unit ? Color.spaceGlow : Color.white.opacity(0.1))
+                .background(unitStore.unit == unit ? Color.black.opacity(0.48) : Color.white.opacity(0.1))
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .stroke(
-                            unitStore.unit == unit ? Color.spaceGlow.opacity(0.9) : Color.white.opacity(0.15),
-                            lineWidth: 1
-                        )
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .stroke(Color.white.opacity(unitStore.unit == unit ? 0.26 : 0.15), lineWidth: 1)
+                        if unitStore.unit == unit {
+                            AnimatedRainbowStroke(cornerRadius: 12, lineWidth: 1.4)
+                        }
+                    }
                 )
         }
         .buttonStyle(.plain)
@@ -168,11 +231,12 @@ struct SplitBuilderView: View {
 
     private var targetSection: some View {
         VStack(alignment: .leading, spacing: Space.m) {
-            HStack {
-                Text("Weekly Targets")
-                    .font(.system(size: 18, weight: .bold))
-                    .foregroundColor(.white)
+            SectionLead(
+                title: "Enough Weekly Work",
+                subtitle: "Default targets work for the plan. Adjust them when your recovery or schedule calls for it."
+            )
 
+            HStack {
                 Spacer()
 
                 Button(customizeTargets ? "Done" : "Customize") {
@@ -192,9 +256,9 @@ struct SplitBuilderView: View {
                 }
             }
 
-            Text("Default is \(Int(TrainingTargets.advancedWeeklySets)) sets per muscle group per week.")
-                .font(.system(size: 13))
-                .foregroundColor(.white.opacity(0.6))
+            Text("Default: \(Int(TrainingTargets.advancedWeeklySets)) hard sets per muscle / week")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(.white.opacity(0.58))
 
             if customizeTargets {
                 VStack(spacing: Space.s) {
@@ -225,15 +289,15 @@ struct SplitBuilderView: View {
                 }
             }
         }
-        .padding(Space.l)
-        .themedCard()
+        .premiumSectionCard()
     }
 
     private var scheduleSection: some View {
         VStack(alignment: .leading, spacing: Space.m) {
-            Text("Weekly Schedule")
-                .font(.system(size: 18, weight: .bold))
-                .foregroundColor(.white)
+            SectionLead(
+                title: "Weekly Repeat",
+                subtitle: "Keep the week stable unless life gets in the way."
+            )
 
             VStack(spacing: Space.s) {
                 ForEach(Array(store.plan.days.enumerated()), id: \.element.id) { index, _ in
@@ -259,7 +323,7 @@ struct SplitBuilderView: View {
                                     .foregroundColor(.white.opacity(0.6))
                             } else {
                                 dayGroupIcons(for: day)
-                                    .frame(maxWidth: 200, alignment: .trailing)
+                                    .frame(maxWidth: 220, alignment: .trailing)
                             }
 
                             Image(systemName: "chevron.right")
@@ -268,9 +332,9 @@ struct SplitBuilderView: View {
                         }
                         .padding(Space.m)
                         .background(Color.white.opacity(0.08))
-                        .cornerRadius(14)
+                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                         .overlay(
-                            RoundedRectangle(cornerRadius: 14)
+                            RoundedRectangle(cornerRadius: 16)
                                 .stroke(Color.white.opacity(0.12), lineWidth: 1)
                         )
                     }
@@ -278,8 +342,7 @@ struct SplitBuilderView: View {
                 }
             }
         }
-        .padding(Space.l)
-        .themedCard()
+        .premiumSectionCard()
     }
 
     private func weekDayLabel(for index: Int) -> String {
@@ -342,76 +405,15 @@ struct SplitBuilderView: View {
     private func groupIcon(for group: MuscleTrainingGroup) -> some View {
         ZStack {
             Circle()
-                .fill(groupColor(for: group).opacity(0.25))
+                .fill(Color.spaceGlow.opacity(0.2))
                 .frame(width: 28, height: 28)
                 .overlay(
                     Circle()
-                        .stroke(groupColor(for: group).opacity(0.55), lineWidth: 1)
+                        .stroke(Color.spaceGlow.opacity(0.45), lineWidth: 1)
                 )
 
-            if group == .abs {
-                sixPackGlyph
-                    .frame(width: 12, height: 16)
-            } else {
-                Image(systemName: groupSymbol(for: group))
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundColor(groupColor(for: group))
-            }
-        }
-    }
-
-    private var sixPackGlyph: some View {
-        VStack(spacing: 1.5) {
-            ForEach(0..<3, id: \.self) { _ in
-                HStack(spacing: 1.5) {
-                    RoundedRectangle(cornerRadius: 1)
-                        .fill(Color.spaceNavy.opacity(0.6))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 1)
-                                .stroke(groupColor(for: .abs), lineWidth: 0.8)
-                        )
-                    RoundedRectangle(cornerRadius: 1)
-                        .fill(Color.spaceNavy.opacity(0.6))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 1)
-                                .stroke(groupColor(for: .abs), lineWidth: 0.8)
-                        )
-                }
-            }
-        }
-    }
-
-    private func groupSymbol(for group: MuscleTrainingGroup) -> String {
-        switch group {
-        case .chest:
-            return "lungs.fill"
-        case .back:
-            return "figure.rower"
-        case .shoulders:
-            return "figure.strengthtraining.functional"
-        case .quads, .hamstrings, .glutes, .calves:
-            return "figure.walk.motion"
-        case .biceps, .triceps:
-            return "dumbbell.fill"
-        case .abs:
-            return "square"
-        }
-    }
-
-    private func groupColor(for group: MuscleTrainingGroup) -> Color {
-        switch group {
-        case .chest:
-            return .chestColor
-        case .back:
-            return .backColor
-        case .shoulders:
-            return .shoulderColor
-        case .quads, .hamstrings, .glutes, .calves:
-            return .legColor
-        case .biceps, .triceps:
-            return .armColor
-        case .abs:
-            return .coreColor
+            TrainingGroupIcon(group: group)
+                .frame(width: 14, height: 14)
         }
     }
 
@@ -431,13 +433,13 @@ struct SplitBuilderView: View {
     private func splitDescription(for split: SplitType) -> String {
         switch split {
         case .pushPullLegs:
-            return "Focused muscle distribution"
+            return "Clear push, pull, legs rhythm"
         case .upperLower:
-            return "Simple high-frequency rotation"
+            return "Simple, repeatable rotation"
         case .fullBody:
-            return "Whole-body each training day"
+            return "Whole body, fewer decisions"
         case .hybrid:
-            return "Blend of PPL and upper/lower"
+            return "Useful for uneven weeks"
         }
     }
 

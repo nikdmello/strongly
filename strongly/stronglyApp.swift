@@ -2,11 +2,18 @@ import SwiftUI
 
 @main
 struct stronglyApp: App {
-    @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
+    @AppStorage("strongly_has_seen_launch_screen") private var hasSeenLaunchScreen = false
+    @AppStorage("strongly_product_onboarding_complete") private var onboardingComplete = false
 
     var body: some Scene {
         WindowGroup {
-            LoadingView()
+            if hasSeenLaunchScreen || onboardingComplete {
+                MainTabView()
+            } else {
+                LoadingView {
+                    hasSeenLaunchScreen = true
+                }
+            }
         }
     }
 }

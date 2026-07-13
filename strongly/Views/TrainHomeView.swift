@@ -3,15 +3,18 @@ import SwiftUI
 struct TrainHomeView: View {
     @Binding var tabSelection: Int
     @AppStorage("user_name") private var userName = ""
+    @AppStorage("strongly_product_onboarding_complete") private var onboardingComplete = false
     @AppStorage("preferred_workout_duration_minutes") private var preferredDuration = 45
     @AppStorage("preferred_workout_duration_user_override") private var durationUserOverride = false
     @State private var isGenerating = false
     @State private var generatedExercises: [ExerciseLog] = []
     @State private var generatedTargets: [MuscleGroup: Double] = [:]
+    @State private var generatedSetBudget = 0
     @State private var showWorkout = false
     @State private var draftName = ""
     @State private var showNameCapture = false
     @State private var autoDurationNote: String?
+    @State private var generationErrorMessage: String?
     @EnvironmentObject private var planStore: SplitPlanStore
 
     var body: some View {
@@ -29,24 +32,46 @@ struct TrainHomeView: View {
                 initialSession: nil,
                 repository: FileSystemWorkoutRepository(),
                 preloadedExercises: generatedExercises,
-                targetOverrides: generatedTargets
+                targetOverrides: generatedTargets,
+                setBudgetOverride: generatedSetBudget
             )
         }
         .sheet(isPresented: $showNameCapture) {
             NameCaptureSheet(
                 draftName: $draftName,
-                onContinue: { enteredName in
+                initialTrainingDays: planStore.plan.trainingDays,
+                initialUnit: UnitSettingsStore.shared.unit,
+                onContinue: { enteredName, trainingDays, unit in
                     let clean = enteredName.trimmingCharacters(in: .whitespacesAndNewlines)
                     guard !clean.isEmpty else { return }
                     userName = clean
+                    UnitSettingsStore.shared.unit = unit
+                    planStore.applyTemplate(trainingDays: trainingDays, splitType: defaultSplitType(for: trainingDays))
+                    durationUserOverride = false
+                    onboardingComplete = true
+                    applyRecommendedDurationIfNeeded()
                     showNameCapture = false
                 }
             )
         }
+        .alert("Unable to Build Workout", isPresented: Binding(
+            get: { generationErrorMessage != nil },
+            set: { isPresented in
+                if !isPresented {
+                    generationErrorMessage = nil
+                }
+            }
+        )) {
+            Button("OK", role: .cancel) {
+                generationErrorMessage = nil
+            }
+        } message: {
+            Text(generationErrorMessage ?? "Please try again.")
+        }
         .onAppear {
             let clean = userName.trimmingCharacters(in: .whitespacesAndNewlines)
-            if clean.isEmpty {
-                draftName = ""
+            if clean.isEmpty || !onboardingComplete {
+                draftName = clean
                 showNameCapture = true
             }
             applyRecommendedDurationIfNeeded()
@@ -61,12 +86,13 @@ struct TrainHomeView: View {
 
     private var planStartView: some View {
         ScrollView(showsIndicators: false) {
-            VStack(spacing: 18) {
+            VStack(spacing: PremiumLayout.sectionSpacing) {
                 topHero
                 planCard
+                gymProfileCard
             }
-            .padding(.horizontal, 20)
-            .padding(.top, 24)
+            .padding(.horizontal, Layout.screenHorizontal)
+            .padding(.top, 14)
             .padding(.bottom, 120)
         }
         .safeAreaInset(edge: .bottom) {
@@ -77,7 +103,7 @@ struct TrainHomeView: View {
     }
 
     private var startWorkoutBar: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 10) {
             Button {
                 Task {
                     await generateWorkout()
@@ -86,49 +112,144 @@ struct TrainHomeView: View {
                 HStack(spacing: 8) {
                     Image(systemName: "play.fill")
                         .font(.system(size: 13, weight: .bold))
-                    Text("Start Workout")
+                    Text("Do Today's Work")
                         .font(.system(size: 18, weight: .semibold))
                 }
                 .font(.system(size: 18, weight: .semibold))
-                    .foregroundColor(.spaceNavy)
+                    .foregroundColor(.white)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 16)
-                    .background(Color.spaceGlow)
-                    .cornerRadius(16)
+                    .background(Color.spacePanelInner)
+                    .cornerRadius(18)
+                    .overlay(
+                        AnimatedRainbowStroke(cornerRadius: 18, lineWidth: 1.5)
+                    )
+                    .shadow(color: .black.opacity(0.24), radius: 12, y: 7)
             }
-            .padding(.horizontal, 20)
+            .padding(.horizontal, Layout.screenHorizontal)
         }
         .padding(.top, 10)
         .padding(.bottom, 8)
+        .background(
+            LinearGradient(
+                colors: [Color.clear, Color.spaceAbyss.opacity(0.96)],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        )
     }
 
     private var topHero: some View {
-        return VStack(spacing: 10) {
-            Image("StronglyIcon")
-                .resizable()
-                .scaledToFit()
-                .frame(width: 86, height: 86)
-                .shadow(color: .white.opacity(0.35), radius: 18)
+        let day = planStore.dayConfig()
+        let rawTargets = plannedTargets(for: Date())
+        let duration = durationPlan(for: day, targets: rawTargets).selected
+        let workSets = planStore.plannedSetBudget(for: day, targets: rawTargets, durationMinutes: duration)
 
-            Text(greetingTitle())
-                .font(.system(size: 32, weight: .bold))
-                .foregroundColor(.white)
+        return VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .top, spacing: 14) {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(greetingTitle())
+                        .font(.system(size: 15, weight: .bold))
+                        .foregroundColor(.white.opacity(0.62))
+
+                    Text(day.isRest ? "Recover today." : "Do \(day.dayType.rawValue).")
+                        .font(.system(size: 38, weight: .heavy))
+                        .foregroundColor(.white)
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.82)
+
+                    Text(day.isRest ? "Come back ready for the next session." : "Finish enough hard sets. Beat last time where you can.")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.7))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: 0)
+
+                ZStack {
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .fill(Color.white.opacity(0.08))
+                        .frame(width: 64, height: 64)
+                    Image("StronglyIcon")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 46, height: 46)
+                }
+            }
+
+            HStack(spacing: 8) {
+                DayTypeBadge(dayType: day.dayType)
+                commandMetric(title: day.isRest ? "Next" : "Sets", value: day.isRest ? nextTrainingShortCopy() : "\(workSets)")
+                commandMetric(title: "Time", value: day.isRest ? "Recover" : "\(duration)m")
+            }
         }
+        .premiumSectionCard(cornerRadius: 26)
+    }
+
+    private var gymProfileCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            SectionLead(
+                title: "Your gym",
+                subtitle: "Free weights, Smith/barbell, cables, machines, pull-ups."
+            )
+
+            HStack(spacing: 8) {
+                principleChip(icon: "dumbbell.fill", text: "Weights")
+                principleChip(icon: "point.3.connected.trianglepath.dotted", text: "Cables")
+                principleChip(icon: "figure.strengthtraining.traditional", text: "Machines")
+                principleChip(icon: "figure.strengthtraining.traditional", text: "Pull-ups")
+            }
+        }
+        .premiumSectionCard(cornerRadius: 22)
+    }
+
+    private func commandMetric(title: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title.uppercased())
+                .font(.system(size: 9, weight: .bold))
+                .foregroundColor(.white.opacity(0.56))
+            Text(value)
+                .font(.system(size: 12, weight: .bold))
+                .foregroundColor(.white)
+                .lineLimit(1)
+                .minimumScaleFactor(0.78)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(Color.white.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.white.opacity(0.1), lineWidth: 1)
+        )
+    }
+
+    private func principleChip(icon: String, text: String) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: icon)
+                .font(.system(size: 11, weight: .bold))
+            Text(text)
+                .font(.system(size: 11, weight: .bold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.82)
+        }
+        .foregroundColor(.white.opacity(0.84))
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 9)
+        .background(Color.white.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 
     private var planCard: some View {
         let day = planStore.dayConfig()
-        let rawTargets = planStore.targetsForDate()
+        let rawTargets = plannedTargets(for: Date())
         let orderedGroups = orderedTrainingGroups(for: day)
-        let recommendedDuration = recommendedWorkoutDurationMinutes(for: day, targets: rawTargets)
-        let previewTargets = previewSessionTargets(
-            for: day,
-            rawTargets: rawTargets,
-            durationMinutes: preferredDuration
-        )
+        let durationPlan = durationPlan(for: day, targets: rawTargets)
+        let previewTargets = rawTargets
         let displayGroups = orderedGroups.filter { targetSets(for: $0, in: previewTargets) > 0 }
 
-        return VStack(alignment: .leading, spacing: 16) {
+        return VStack(alignment: .leading, spacing: 18) {
             trainCardHeader(day: day)
 
             if day.isRest || previewTargets.isEmpty {
@@ -138,28 +259,32 @@ struct TrainHomeView: View {
                     day: day,
                     targets: previewTargets,
                     groups: displayGroups,
-                    selectedDuration: preferredDuration,
-                    recommendedDuration: recommendedDuration
+                    selectedDuration: durationPlan.selected,
+                    recommendedDuration: durationPlan.recommended
                 )
             }
         }
-        .padding(18)
-        .frame(maxWidth: .infinity, minHeight: day.isRest ? 280 : 360, alignment: .topLeading)
-        .themedCard(cornerRadius: 22)
+        .frame(maxWidth: .infinity, minHeight: day.isRest ? 260 : 350, alignment: .topLeading)
+        .premiumSectionCard(cornerRadius: 24)
     }
 
     private func trainCardHeader(day: SplitDayConfig) -> some View {
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
+                Text("Minimum effective work")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundColor(.white.opacity(0.58))
                 DayTypeBadge(dayType: day.dayType)
-                Text(day.isRest ? "Rest Day" : "\(day.dayType.rawValue) Day")
-                    .font(.system(size: 18, weight: .bold))
+                Text(day.isRest ? "Rest Day" : "Finish this. Repeat next time.")
+                    .font(.system(size: 22, weight: .bold))
                     .foregroundColor(.white)
             }
 
             Spacer()
 
-            changeTodayMenu
+            VStack(alignment: .trailing, spacing: 8) {
+                changeTodayMenu
+            }
         }
     }
 
@@ -167,62 +292,46 @@ struct TrainHomeView: View {
         Menu {
             if planStore.hasAgendaOverrideForToday() {
                 Button("Back to Plan") {
-                    withAnimation(Motion.quick) {
-                        planStore.resetAgendaForTodayToPlan()
-                        applyRecommendedDurationIfNeeded()
-                    }
+                    planStore.resetAgendaForTodayToPlan()
+                    applyRecommendedDurationIfNeeded()
                 }
             }
 
             Button("Rest") {
-                withAnimation(Motion.quick) {
-                    planStore.setAgendaForToday(.rest)
-                }
+                planStore.setAgendaForToday(.rest)
             }
 
             Divider()
 
             Button("Push") {
-                withAnimation(Motion.quick) {
-                    planStore.setAgendaForToday(.push)
-                    applyRecommendedDurationIfNeeded()
-                }
+                planStore.setAgendaForToday(.push)
+                applyRecommendedDurationIfNeeded()
             }
             Button("Pull") {
-                withAnimation(Motion.quick) {
-                    planStore.setAgendaForToday(.pull)
-                    applyRecommendedDurationIfNeeded()
-                }
+                planStore.setAgendaForToday(.pull)
+                applyRecommendedDurationIfNeeded()
             }
             Button("Legs") {
-                withAnimation(Motion.quick) {
-                    planStore.setAgendaForToday(.legs)
-                    applyRecommendedDurationIfNeeded()
-                }
+                planStore.setAgendaForToday(.legs)
+                applyRecommendedDurationIfNeeded()
             }
             Button("Upper") {
-                withAnimation(Motion.quick) {
-                    planStore.setAgendaForToday(.upper)
-                    applyRecommendedDurationIfNeeded()
-                }
+                planStore.setAgendaForToday(.upper)
+                applyRecommendedDurationIfNeeded()
             }
             Button("Lower") {
-                withAnimation(Motion.quick) {
-                    planStore.setAgendaForToday(.lower)
-                    applyRecommendedDurationIfNeeded()
-                }
+                planStore.setAgendaForToday(.lower)
+                applyRecommendedDurationIfNeeded()
             }
             Button("Full Body") {
-                withAnimation(Motion.quick) {
-                    planStore.setAgendaForToday(.full)
-                    applyRecommendedDurationIfNeeded()
-                }
+                planStore.setAgendaForToday(.full)
+                applyRecommendedDurationIfNeeded()
             }
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: "slider.horizontal.3")
                     .font(.system(size: 11, weight: .bold))
-                Text("Change Today")
+                Text("Edit")
                     .font(.system(size: 11, weight: .semibold))
             }
             .foregroundColor(.white.opacity(0.9))
@@ -241,23 +350,28 @@ struct TrainHomeView: View {
         selectedDuration: Int,
         recommendedDuration: Int
     ) -> some View {
-        let plannedWorkSets = estimatedWorkoutSetCount(
+        let requiredWorkSets = planStore.requiredSetBudget(for: day, targets: targets)
+        let plannedWorkSets = planStore.plannedSetBudget(
             for: day,
+            targets: targets,
             durationMinutes: selectedDuration
+        )
+        let recommendedPlannedSets = planStore.plannedSetBudget(
+            for: day,
+            targets: targets,
+            durationMinutes: recommendedDuration
         )
         let weeklyProgress = weeklyProgress(for: targets)
 
-        return VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 6) {
-                Text("\(selectedDuration)m today")
-                Text("•")
-                Text("\(plannedWorkSets) work sets")
-            }
-            .font(.system(size: 14, weight: .semibold))
-            .foregroundColor(.white.opacity(0.78))
+        return VStack(alignment: .leading, spacing: 16) {
+            sessionPlanMetricsRow(
+                requiredSets: requiredWorkSets,
+                plannedSets: plannedWorkSets,
+                selectedDuration: selectedDuration
+            )
 
             VStack(alignment: .leading, spacing: 9) {
-                Text("Today's Focus")
+                Text("Muscles to cover")
                     .font(.system(size: 13, weight: .bold))
                     .foregroundColor(.white.opacity(0.7))
 
@@ -279,7 +393,7 @@ struct TrainHomeView: View {
 
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
-                    Text("Weekly Pace")
+                    Text("Weekly basics")
                         .font(.system(size: 12, weight: .bold))
                         .foregroundColor(.white.opacity(0.7))
                     Spacer()
@@ -294,20 +408,69 @@ struct TrainHomeView: View {
                         .frame(height: 8)
                         .overlay(alignment: .leading) {
                             Capsule()
-                                .fill(Color.spaceGlow)
+                                .fill(Color.clear)
+                                .overlay {
+                                    AnimatedRainbowRail(height: 8)
+                                }
+                                .clipShape(Capsule())
                                 .frame(width: max(8, geo.size.width * weeklyProgress.ratio), height: 8)
                         }
                 }
                 .frame(height: 8)
             }
 
-            durationCard(recommendedDuration: recommendedDuration)
+            durationCard(
+                selectedDuration: selectedDuration,
+                recommendedDuration: recommendedDuration,
+                requiredWorkSets: requiredWorkSets,
+                plannedWorkSets: plannedWorkSets,
+                recommendedPlannedSets: recommendedPlannedSets
+            )
+        }
+        .padding(.top, 2)
+    }
+
+    private func sessionPlanMetricsRow(
+        requiredSets: Int,
+        plannedSets: Int,
+        selectedDuration: Int
+    ) -> some View {
+        HStack(spacing: 8) {
+            sessionMetricChip(title: "Target", value: "\(requiredSets)")
+            sessionMetricChip(title: "Sets", value: "\(plannedSets)")
+            sessionMetricChip(title: "Time", value: "\(selectedDuration)m")
         }
     }
 
+    private func sessionMetricChip(title: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(title.uppercased())
+                .font(.system(size: 10, weight: .bold))
+                .foregroundColor(.white.opacity(0.56))
+                .tracking(0.8)
+            Text(value)
+                .font(.system(size: 17, weight: .bold))
+                .foregroundColor(.white)
+                .monospacedDigit()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 10)
+        .background(Color.white.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.white.opacity(0.12), lineWidth: 1)
+        )
+    }
+
     private func restDayBody() -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Recover today and come back stronger.")
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Recovery Day")
+                .font(.system(size: 16, weight: .bold))
+                .foregroundColor(.white)
+
+            Text("Recovery is part of the plan. Let today make the next session better.")
                 .font(.system(size: 14, weight: .medium))
                 .foregroundColor(.white.opacity(0.78))
 
@@ -323,13 +486,13 @@ struct TrainHomeView: View {
             }
 
             HStack(spacing: 10) {
-                Text("Keep Rest")
+                    Text("Keep Recovery")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundColor(.white.opacity(0.8))
                     .padding(.horizontal, 14)
                     .padding(.vertical, 8)
-                    .background(Color.white.opacity(0.12))
-                    .cornerRadius(10)
+                    .background(Color.white.opacity(0.08))
+                    .clipShape(Capsule())
 
                 Button {
                     withAnimation(Motion.quick) {
@@ -338,11 +501,14 @@ struct TrainHomeView: View {
                 } label: {
                     Text("Train Today")
                         .font(.system(size: 13, weight: .semibold))
-                        .foregroundColor(.spaceNavy)
+                        .foregroundColor(.white)
                         .padding(.horizontal, 14)
                         .padding(.vertical, 8)
-                        .background(Color.spaceGlow)
-                        .cornerRadius(10)
+                        .background(Color.white.opacity(0.1))
+                        .clipShape(Capsule())
+                        .overlay(
+                            AnimatedRainbowStroke(cornerRadius: 999, lineWidth: 1.2)
+                        )
                 }
                 .disabled(!planStore.canSkipRestToday())
                 .opacity(planStore.canSkipRestToday() ? 1 : 0.5)
@@ -350,10 +516,16 @@ struct TrainHomeView: View {
         }
     }
 
-    private func durationCard(recommendedDuration: Int) -> some View {
+    private func durationCard(
+        selectedDuration: Int,
+        recommendedDuration: Int,
+        requiredWorkSets: Int,
+        plannedWorkSets: Int,
+        recommendedPlannedSets: Int
+    ) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text("Workout Time")
+                Text("Time Box")
                     .font(.system(size: 13, weight: .bold))
                     .foregroundColor(.white.opacity(0.72))
                 Spacer()
@@ -368,7 +540,7 @@ struct TrainHomeView: View {
             HStack(spacing: 10) {
                 Button {
                     durationUserOverride = true
-                    preferredDuration = max(15, preferredDuration - 5)
+                    preferredDuration = max(30, preferredDuration - 5)
                     autoDurationNote = nil
                 } label: {
                     Image(systemName: "minus")
@@ -414,6 +586,7 @@ struct TrainHomeView: View {
                         .padding(.vertical, 7)
                         .background(Color.white.opacity(0.12))
                         .clipShape(Capsule())
+                        .fixedSize(horizontal: true, vertical: false)
                         .overlay(
                             Capsule()
                                 .stroke(Color.spaceGlow.opacity(0.45), lineWidth: 1)
@@ -422,18 +595,47 @@ struct TrainHomeView: View {
                 .buttonStyle(.plain)
             }
 
-            if let note = durationRecommendationText(recommendedDuration: recommendedDuration) {
+            if let note = durationRecommendationText(
+                selectedDuration: selectedDuration,
+                recommendedDuration: recommendedDuration,
+                requiredWorkSets: requiredWorkSets,
+                plannedWorkSets: plannedWorkSets,
+                recommendedPlannedSets: recommendedPlannedSets
+            ) {
                 Text(note)
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundColor(.white.opacity(0.68))
+                    .lineLimit(2)
             }
         }
         .padding(12)
-        .background(Color.white.opacity(0.06))
+        .background(Color.white.opacity(0.08))
         .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(Color.white.opacity(0.1), lineWidth: 1)
+                .stroke(Color.white.opacity(0.14), lineWidth: 1)
+        )
+    }
+
+    private func metricChip(title: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title.uppercased())
+                .font(.system(size: 9, weight: .bold))
+                .foregroundColor(.white.opacity(0.56))
+                .tracking(0.8)
+            Text(value)
+                .font(.system(size: 13, weight: .bold))
+                .foregroundColor(.white.opacity(0.9))
+                .monospacedDigit()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(Color.white.opacity(0.07))
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(Color.white.opacity(0.09), lineWidth: 1)
         )
     }
 
@@ -441,16 +643,10 @@ struct TrainHomeView: View {
         HStack(spacing: 8) {
             ZStack {
                 Circle()
-                    .fill(groupColor(for: group).opacity(0.24))
+                    .fill(Color.spaceGlow.opacity(0.2))
                     .frame(width: 26, height: 26)
-                if group == .abs {
-                    sixPackGlyph
-                        .frame(width: 10, height: 13)
-                } else {
-                    Image(systemName: groupSymbol(for: group))
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundColor(groupColor(for: group))
-                }
+                TrainingGroupIcon(group: group, compact: true)
+                    .frame(width: 12, height: 12)
             }
 
             Text(group.displayName)
@@ -514,18 +710,110 @@ struct TrainHomeView: View {
         return "Next training day is open."
     }
 
-    private func estimatedWorkoutSetCount(
-        for day: SplitDayConfig,
-        durationMinutes: Int
-    ) -> Int {
-        guard !day.isRest else { return 0 }
+    private func nextTrainingShortCopy() -> String {
+        let calendar = Calendar.current
+        let today = Date()
 
-        let warmup = day.dayType == .legs || day.dayType == .lower ? 8.0 : 6.0
-        let activeMinutes = max(0, Double(durationMinutes) - warmup)
-        let minutesPerSet = max(estimatedMinutesPerSet(for: day.dayType), 1.8)
-        let capacityByTime = Int(floor(activeMinutes / minutesPerSet))
-        let minimumUsefulSets = max(day.resolvedMuscles().count, 6)
-        return max(minimumUsefulSets, capacityByTime)
+        for offset in 1...7 {
+            guard let date = calendar.date(byAdding: .day, value: offset, to: today) else { continue }
+            let day = planStore.dayConfig(for: date)
+            guard !day.isRest else { continue }
+            return offset == 1 ? "\(day.dayType.rawValue) tomorrow" : "\(day.dayType.rawValue) in \(offset)d"
+        }
+
+        return "Open"
+    }
+
+    private func enforceQuotaCoverage(
+        exercises: [ExerciseLog],
+        targets: [MuscleGroup: Double],
+        equipment: EquipmentType,
+        maxTotalSets: Int
+    ) -> [ExerciseLog] {
+        guard !targets.isEmpty else { return exercises }
+        guard maxTotalSets > 0 else { return exercises }
+        var adjusted = exercises
+        var safety = 0
+
+        while safety < 160 {
+            let totalSets = totalPlannedSets(in: adjusted)
+            if totalSets >= maxTotalSets {
+                break
+            }
+            let achieved = MuscleTracker.setCredits(for: adjusted, completedOnly: false)
+            let deficits = MuscleTracker.deficits(required: targets, achieved: achieved)
+            guard let mostUnderTarget = deficits.max(by: { $0.value < $1.value }) else { break }
+            let muscle = mostUnderTarget.key
+
+            if let index = adjusted.firstIndex(where: { log in
+                guard let metadata = ExerciseDatabase.shared.getExercise(named: log.name) else { return false }
+                return metadata.primaryMuscles.contains(muscle) || metadata.secondaryMuscles.contains(muscle)
+            }) {
+                if let metadata = ExerciseDatabase.shared.getExercise(named: adjusted[index].name),
+                   adjusted[index].sets.count >= maxSetsPerExercise(for: metadata),
+                   let fallback = fallbackExercise(for: muscle, equipment: equipment, allowedEquipment: userGymEquipment) {
+                    let reps = prescribedReps(for: fallback, seedReps: 10)
+                    let weight = prescribedWeight(for: fallback, seedWeight: 0)
+                    adjusted.append(
+                        ExerciseLog(
+                            name: fallback.name,
+                            sets: [ExerciseSet(weight: weight, reps: reps, completed: false)],
+                            notes: ""
+                        )
+                    )
+                    safety += 1
+                    continue
+                }
+                let seed = adjusted[index].sets.last ?? ExerciseSet(weight: 0, reps: 10, completed: false)
+                adjusted[index].sets.append(
+                    ExerciseSet(weight: seed.weight, reps: seed.reps, completed: false)
+                )
+            } else if let fallback = fallbackExercise(for: muscle, equipment: equipment, allowedEquipment: userGymEquipment),
+                      totalSets < maxTotalSets {
+                let reps = prescribedReps(for: fallback, seedReps: 10)
+                let weight = prescribedWeight(for: fallback, seedWeight: 0)
+                adjusted.append(
+                    ExerciseLog(
+                        name: fallback.name,
+                        sets: [ExerciseSet(weight: weight, reps: reps, completed: false)],
+                        notes: ""
+                    )
+                )
+            } else {
+                break
+            }
+
+            safety += 1
+        }
+
+        return adjusted
+    }
+
+    private func totalPlannedSets(in exercises: [ExerciseLog]) -> Int {
+        exercises.reduce(0) { $0 + $1.sets.count }
+    }
+
+    private func fallbackExercise(
+        for muscle: MuscleGroup,
+        equipment: EquipmentType,
+        allowedEquipment: Set<Equipment>
+    ) -> Exercise? {
+        ExerciseDatabase.shared.exercises.first { exercise in
+            guard exercise.isProgressiveHypertrophyCandidate else { return false }
+            guard allowedEquipment.contains(exercise.equipment) else { return false }
+            let equipmentMatch: Bool = {
+                switch equipment {
+                case .both:
+                    return true
+                case .bodyweight:
+                    return exercise.equipment == .bodyweight || exercise.equipment == .band
+                case .gym:
+                    return exercise.equipment != .bodyweight && exercise.equipment != .band
+                }
+            }()
+            guard equipmentMatch else { return false }
+            return exercise.primaryMuscles.contains(muscle) || exercise.secondaryMuscles.contains(muscle)
+        }
     }
 
     private var generatingView: some View {
@@ -534,7 +822,7 @@ struct TrainHomeView: View {
                 .scaleEffect(1.5)
                 .tint(.white)
 
-            Text("Building your workout...")
+            Text("Setting up today's work...")
                 .font(.system(size: 20, weight: .semibold))
                 .foregroundColor(.white)
         }
@@ -542,6 +830,7 @@ struct TrainHomeView: View {
 
     private func generateWorkout() async {
         isGenerating = true
+        generationErrorMessage = nil
 
         let generator = WorkoutGenerator.shared
         let today = Date()
@@ -551,20 +840,24 @@ struct TrainHomeView: View {
         let focus = automaticFocus(for: today)
         let equipment = automaticEquipment(for: today)
 
-        let duration = max(15, preferredDuration)
-        let sessionTargets = previewSessionTargets(
+        let sessionTargets = rawTargets
+        let durationPlan = durationPlan(for: todayDay, targets: sessionTargets)
+        let selectedDuration = durationPlan.selected
+        if !durationUserOverride {
+            preferredDuration = selectedDuration
+        }
+
+        let requiredWorkSets = planStore.requiredSetBudget(for: todayDay, targets: sessionTargets)
+        let plannedWorkSets = planStore.plannedSetBudget(
             for: todayDay,
-            rawTargets: rawTargets,
-            durationMinutes: duration
-        )
-        let plannedWorkSets = estimatedWorkoutSetCount(
-            for: todayDay,
-            durationMinutes: duration
+            targets: sessionTargets,
+            durationMinutes: selectedDuration
         )
         let request = WorkoutRequest(
-            duration: duration,
+            duration: selectedDuration,
             targetMuscles: muscles,
             equipment: equipment,
+            allowedEquipment: userGymEquipment,
             focus: focus,
             preferredExercises: []
         )
@@ -573,6 +866,8 @@ struct TrainHomeView: View {
         if workout.exercises.isEmpty {
             generatedExercises = []
             generatedTargets = sessionTargets
+            generatedSetBudget = plannedWorkSets
+            generationErrorMessage = "Today’s work needs an exercise match. Add exercises or keep the plan simple."
             isGenerating = false
             return
         }
@@ -580,16 +875,49 @@ struct TrainHomeView: View {
         let allocation = allocateSetsForTargets(
             exercises: workout.exercises,
             targets: sessionTargets,
-            minTotalSets: plannedWorkSets,
+            minTotalSets: requiredWorkSets,
             maxTotalSets: plannedWorkSets
         )
 
-        generatedExercises = allocation.exercises
+        var candidateExercises = enforceQuotaCoverage(
+            exercises: allocation.exercises,
+            targets: sessionTargets,
+            equipment: equipment,
+            maxTotalSets: plannedWorkSets
+        )
+        candidateExercises = rebalanceToExactSetBudget(
+            exercises: candidateExercises,
+            targets: sessionTargets,
+            equipment: equipment,
+            desiredTotalSets: plannedWorkSets
+        )
+
+        let contract = validateGeneratorContract(
+            exercises: candidateExercises,
+            requiredTargets: sessionTargets,
+            expectedSetBudget: plannedWorkSets
+        )
+        guard !candidateExercises.isEmpty else {
+            generatedExercises = []
+            generatedTargets = sessionTargets
+            generatedSetBudget = 0
+            generationErrorMessage = "Today’s work needs an exercise match. Add exercises or keep the plan simple."
+            isGenerating = false
+            return
+        }
+
+        generatedExercises = candidateExercises
+        planStore.recordGeneratedQuotaResult(
+            required: sessionTargets,
+            planned: contract.plannedCredits,
+            context: "train_generate_workout"
+        )
         generatedTargets = sessionTargets
+        generatedSetBudget = contract.valid ? plannedWorkSets : totalPlannedSets(in: candidateExercises)
         autoDurationNote = buildAutoDurationNote(
             rawTargets: rawTargets,
             sessionTargets: sessionTargets,
-            duration: duration
+            duration: selectedDuration
         )
 
         for i in 0..<3 {
@@ -638,82 +966,22 @@ struct TrainHomeView: View {
         return "Hi, \(first)"
     }
 
-    private func recommendedWorkoutDurationMinutes(
-        for day: SplitDayConfig,
-        targets: [MuscleGroup: Double]
-    ) -> Int {
-        if day.isRest {
-            return 0
-        }
-
-        let targetCredit = targets.values.reduce(0, +)
-        let creditPerSet = estimatedCreditPerSet(for: day.dayType)
-        let setsNeeded = max(Double(day.resolvedMuscles().count), targetCredit / max(creditPerSet, 0.75))
-        let warmup = day.dayType == .legs || day.dayType == .lower ? 8.0 : 6.0
-        let minutesPerSet = estimatedMinutesPerSet(for: day.dayType)
-        let rawMinutes = Int((warmup + (setsNeeded * minutesPerSet)).rounded())
-        let clamped = min(60, max(45, rawMinutes))
-        let rounded = Int((Double(clamped) / 5.0).rounded() * 5.0)
-        return min(60, max(45, rounded))
-    }
-
     private func applyRecommendedDurationIfNeeded() {
         let day = planStore.dayConfig()
         guard !day.isRest else { return }
         guard !durationUserOverride else { return }
-        preferredDuration = recommendedWorkoutDurationMinutes(
-            for: day,
-            targets: plannedTargets(for: Date())
-        )
+        preferredDuration = durationPlan(for: day, targets: plannedTargets(for: Date())).recommended
     }
 
-    private func previewSessionTargets(
+    private func durationPlan(
         for day: SplitDayConfig,
-        rawTargets: [MuscleGroup: Double],
-        durationMinutes: Int
-    ) -> [MuscleGroup: Double] {
-        guard !day.isRest else { return [:] }
-        guard !rawTargets.isEmpty else { return [:] }
-
-        let warmup = day.dayType == .legs || day.dayType == .lower ? 8.0 : 6.0
-        let activeMinutes = max(0, Double(durationMinutes) - warmup)
-        let minutesPerSet = max(estimatedMinutesPerSet(for: day.dayType), 1.8)
-        let capacityByTime = Int(floor(activeMinutes / minutesPerSet))
-        let minimumUsefulSets = max(day.resolvedMuscles().count, 6)
-        let setCapacity = max(minimumUsefulSets, capacityByTime)
-
-        let targetCredit = rawTargets.values.reduce(0, +)
-        guard targetCredit > 0 else { return rawTargets }
-
-        let creditPerSet = estimatedCreditPerSet(for: day.dayType)
-        let achievableCredit = Double(setCapacity) * max(creditPerSet, 0.8)
-        guard achievableCredit + 0.01 < targetCredit else {
-            return rawTargets.filter { $0.value > 0 }
-        }
-
-        let scale = max(0.35, achievableCredit / targetCredit)
-        return scaledTargets(rawTargets, scale: scale)
-    }
-
-    private func scaledTargets(
-        _ rawTargets: [MuscleGroup: Double],
-        scale: Double
-    ) -> [MuscleGroup: Double] {
-        guard scale < 0.999 else {
-            return rawTargets.filter { $0.value > 0 }
-        }
-
-        var scaled: [MuscleGroup: Double] = [:]
-        for (muscle, target) in rawTargets where target > 0 {
-            let rawValue = target * scale
-            let roundedHalfStep = (rawValue * 2).rounded() / 2
-            let minimum: Double = (target >= 2 && scale >= 0.4) ? 0.5 : 0
-            let value = max(minimum, roundedHalfStep)
-            if value > 0 {
-                scaled[muscle] = value
-            }
-        }
-        return scaled
+        targets: [MuscleGroup: Double]
+    ) -> (recommended: Int, selected: Int) {
+        let recommended = planStore.recommendedWorkoutDurationMinutes(for: day, targets: targets)
+        let selected = durationUserOverride
+            ? preferredDuration
+            : recommended
+        return (recommended, selected)
     }
 
     private func buildAutoDurationNote(
@@ -724,42 +992,121 @@ struct TrainHomeView: View {
         let rawTotal = rawTargets.values.reduce(0, +)
         let sessionTotal = sessionTargets.values.reduce(0, +)
         if sessionTotal + 0.5 < rawTotal {
-            return "Auto balanced today to \(formatSets(sessionTotal)) focus sets in \(duration)m."
+            return "Auto kept today to \(formatSets(sessionTotal)) focused sets in \(duration)m."
         }
-        return "Today fits your weekly pace in \(duration)m."
+        return "Today has enough work in \(duration)m."
     }
 
-    private func durationRecommendationText(recommendedDuration: Int) -> String? {
-        if durationUserOverride, recommendedDuration != preferredDuration {
-            return "Auto suggests \(recommendedDuration)m to stay on weekly pace."
+    private func durationRecommendationText(
+        selectedDuration: Int,
+        recommendedDuration: Int,
+        requiredWorkSets: Int,
+        plannedWorkSets: Int,
+        recommendedPlannedSets: Int
+    ) -> String? {
+        if durationUserOverride {
+            let delta = plannedWorkSets - recommendedPlannedSets
+            if delta != 0 {
+                let prefix = delta > 0 ? "+" : ""
+                return "Time override \(selectedDuration)m: \(prefix)\(delta) work sets vs auto."
+            }
+            return "Time override keeps today at \(max(requiredWorkSets, plannedWorkSets)) sets."
+        }
+        if selectedDuration != recommendedDuration {
+            return "Auto set \(selectedDuration)m for today’s work."
         }
         return autoDurationNote
     }
 
-    private func estimatedMinutesPerSet(for dayType: DayType) -> Double {
-        switch dayType {
-        case .legs, .lower:
-            return 2.9
-        case .full:
-            return 2.8
-        case .push, .pull, .upper:
-            return 2.7
-        case .rest:
-            return 0
+    private func rebalanceToExactSetBudget(
+        exercises: [ExerciseLog],
+        targets: [MuscleGroup: Double],
+        equipment: EquipmentType,
+        desiredTotalSets: Int
+    ) -> [ExerciseLog] {
+        guard desiredTotalSets > 0 else { return [] }
+        var adjusted = exercises
+        var safety = 0
+
+        while totalPlannedSets(in: adjusted) < desiredTotalSets, safety < 220 {
+            let achieved = MuscleTracker.setCredits(for: adjusted, completedOnly: false)
+            let deficits = MuscleTracker.deficits(required: targets, achieved: achieved)
+            let targetMuscle = deficits.max(by: { $0.value < $1.value })?.key
+                ?? targets.max(by: { $0.value < $1.value })?.key
+            guard let targetMuscle else { break }
+
+            if let index = adjusted.firstIndex(where: { log in
+                guard let metadata = ExerciseDatabase.shared.getExercise(named: log.name) else { return false }
+                return metadata.primaryMuscles.contains(targetMuscle) || metadata.secondaryMuscles.contains(targetMuscle)
+            }) {
+                let seed = adjusted[index].sets.last ?? ExerciseSet(weight: 0, reps: 10, completed: false)
+                adjusted[index].sets.append(ExerciseSet(weight: seed.weight, reps: seed.reps, completed: false))
+            } else if let fallback = fallbackExercise(for: targetMuscle, equipment: equipment, allowedEquipment: userGymEquipment) {
+                adjusted.append(
+                    ExerciseLog(
+                        name: fallback.name,
+                        sets: [ExerciseSet(
+                            weight: prescribedWeight(for: fallback, seedWeight: 0),
+                            reps: prescribedReps(for: fallback, seedReps: 10),
+                            completed: false
+                        )],
+                        notes: ""
+                    )
+                )
+            } else {
+                break
+            }
+            safety += 1
         }
+
+        while totalPlannedSets(in: adjusted) > desiredTotalSets, safety < 420 {
+            let achieved = MuscleTracker.setCredits(for: adjusted, completedOnly: false)
+            let removable = adjusted.indices
+                .filter { !adjusted[$0].sets.isEmpty }
+                .max { lhs, rhs in
+                    let lhsScore = removableSafetyScore(exercise: adjusted[lhs], achieved: achieved, required: targets)
+                    let rhsScore = removableSafetyScore(exercise: adjusted[rhs], achieved: achieved, required: targets)
+                    return lhsScore < rhsScore
+                }
+            guard let index = removable else { break }
+
+            adjusted[index].sets.removeLast()
+            if adjusted[index].sets.isEmpty {
+                adjusted.remove(at: index)
+            }
+            safety += 1
+        }
+
+        return adjusted
     }
 
-    private func estimatedCreditPerSet(for dayType: DayType) -> Double {
-        switch dayType {
-        case .legs, .lower:
-            return 1.1
-        case .full:
-            return 1.4
-        case .push, .pull, .upper:
-            return 1.3
-        case .rest:
-            return 1.0
+    private func removableSafetyScore(
+        exercise: ExerciseLog,
+        achieved: [MuscleGroup: Double],
+        required: [MuscleGroup: Double]
+    ) -> Double {
+        guard let metadata = ExerciseDatabase.shared.getExercise(named: exercise.name) else {
+            return 0
         }
+        var score = 0.0
+        for muscle in metadata.primaryMuscles {
+            score += max(0, (achieved[muscle] ?? 0) - (required[muscle] ?? 0))
+        }
+        for muscle in metadata.secondaryMuscles {
+            score += max(0, (achieved[muscle] ?? 0) - (required[muscle] ?? 0)) * TrainingTargets.secondaryMuscleCredit
+        }
+        return score
+    }
+
+    private func validateGeneratorContract(
+        exercises: [ExerciseLog],
+        requiredTargets: [MuscleGroup: Double],
+        expectedSetBudget: Int
+    ) -> (valid: Bool, plannedCredits: [MuscleGroup: Double]) {
+        let plannedCredits = MuscleTracker.setCredits(for: exercises, completedOnly: false)
+        let deficits = MuscleTracker.deficits(required: requiredTargets, achieved: plannedCredits)
+        let setBudgetMatches = totalPlannedSets(in: exercises) == expectedSetBudget
+        return (deficits.isEmpty && setBudgetMatches, plannedCredits)
     }
 
     private func orderedTrainingGroups(for day: SplitDayConfig) -> [MuscleTrainingGroup] {
@@ -773,71 +1120,27 @@ struct TrainHomeView: View {
         return ordered
     }
 
-    private func groupSymbol(for group: MuscleTrainingGroup) -> String {
-        switch group {
-        case .chest:
-            return "lungs.fill"
-        case .back:
-            return "figure.rower"
-        case .shoulders:
-            return "figure.strengthtraining.functional"
-        case .quads, .hamstrings, .glutes, .calves:
-            return "figure.walk.motion"
-        case .biceps, .triceps:
-            return "dumbbell.fill"
-        case .abs:
-            return "square"
-        }
-    }
-
-    private var sixPackGlyph: some View {
-        VStack(spacing: 1.4) {
-            ForEach(0..<3, id: \.self) { _ in
-                HStack(spacing: 1.4) {
-                    RoundedRectangle(cornerRadius: 0.8)
-                        .fill(Color.spaceNavy.opacity(0.6))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 0.8)
-                                .stroke(groupColor(for: .abs), lineWidth: 0.8)
-                        )
-                    RoundedRectangle(cornerRadius: 0.8)
-                        .fill(Color.spaceNavy.opacity(0.6))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 0.8)
-                                .stroke(groupColor(for: .abs), lineWidth: 0.8)
-                        )
-                }
-            }
-        }
-    }
-
-    private func groupColor(for group: MuscleTrainingGroup) -> Color {
-        switch group {
-        case .chest:
-            return .chestColor
-        case .back:
-            return .backColor
-        case .shoulders:
-            return .shoulderColor
-        case .quads, .hamstrings, .glutes, .calves:
-            return .legColor
-        case .biceps, .triceps:
-            return .armColor
-        case .abs:
-            return .coreColor
-        }
-    }
-
     private func automaticFocus(for date: Date) -> WorkoutFocus {
-        let day = planStore.dayConfig(for: date)
-        if day.isRest {
-            return .mobility
-        }
-        return .balanced
+        .strength
     }
 
     private func automaticEquipment(for date: Date) -> EquipmentType {
         .both
+    }
+
+    private var userGymEquipment: Set<Equipment> {
+        [.barbell, .dumbbell, .cable, .machine, .bodyweight]
+    }
+
+    private func defaultSplitType(for trainingDays: Int) -> SplitType {
+        switch trainingDays {
+        case 6:
+            return .pushPullLegs
+        case 5:
+            return .hybrid
+        default:
+            return .upperLower
+        }
     }
 
     private func allocateSetsForTargets(
@@ -1121,11 +1424,29 @@ struct TrainHomeView: View {
 
 private struct NameCaptureSheet: View {
     @Binding var draftName: String
-    let onContinue: (String) -> Void
+    let initialTrainingDays: Int
+    let initialUnit: WeightUnit
+    let onContinue: (String, Int, WeightUnit) -> Void
     @Environment(\.dismiss) private var dismiss
     @FocusState private var isNameFocused: Bool
-    private let accent = Color(hexString: "00C805")
+    @State private var trainingDays: Int
+    @State private var unit: WeightUnit
+    private let accent = Color.spaceGlow
     private let cleanNameLimit = 28
+
+    init(
+        draftName: Binding<String>,
+        initialTrainingDays: Int,
+        initialUnit: WeightUnit,
+        onContinue: @escaping (String, Int, WeightUnit) -> Void
+    ) {
+        self._draftName = draftName
+        self.initialTrainingDays = initialTrainingDays
+        self.initialUnit = initialUnit
+        self.onContinue = onContinue
+        self._trainingDays = State(initialValue: initialTrainingDays)
+        self._unit = State(initialValue: initialUnit)
+    }
 
     var body: some View {
         NavigationStack {
@@ -1133,15 +1454,18 @@ private struct NameCaptureSheet: View {
                 StarfieldBackground().ignoresSafeArea()
                 backgroundGlow
 
-                VStack(alignment: .leading, spacing: 22) {
-                    header
-                    nameInputCard
-                    Spacer(minLength: 0)
-                    continueButton
+                ScrollView(showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 18) {
+                        header
+                        contractCard
+                        nameInputCard
+                        setupCard
+                        continueButton
+                    }
+                    .padding(.horizontal, 24)
+                    .padding(.top, 26)
+                    .padding(.bottom, 22)
                 }
-                .padding(.horizontal, 24)
-                .padding(.top, 26)
-                .padding(.bottom, 18)
             }
             .onAppear {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
@@ -1172,20 +1496,53 @@ private struct NameCaptureSheet: View {
                     Text("Welcome to Strongly")
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundColor(.white.opacity(0.75))
-                    Text("Set Your Name")
+                    Text("Train steady")
                         .font(.system(size: 23, weight: .bold))
                         .foregroundColor(.white)
                 }
             }
 
-            Text("What should we call you?")
+            Text("Set the plan once.")
                 .font(.system(size: 30, weight: .black))
                 .foregroundColor(.white)
                 .fixedSize(horizontal: false, vertical: true)
 
-            Text("We will personalize your Train tab with this name.")
+            Text("Strongly gives you today's work, the target to beat, and the recovery rhythm. Keep it for 8 weeks.")
                 .font(.system(size: 14, weight: .medium))
                 .foregroundColor(.white.opacity(0.7))
+        }
+    }
+
+    private var contractCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            contractRow(icon: "checkmark.circle.fill", title: "Show up", subtitle: "Today tells you the work.")
+            contractRow(icon: "arrow.up.right.circle.fill", title: "Beat last time", subtitle: "Add reps or weight when ready.")
+            contractRow(icon: "moon.stars.fill", title: "Recover", subtitle: "Rest is part of the system.")
+        }
+        .padding(16)
+        .background(Color.white.opacity(0.06))
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(Color.white.opacity(0.14), lineWidth: 1)
+        )
+    }
+
+    private func contractRow(icon: String, title: String, subtitle: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: icon)
+                .font(.system(size: 15, weight: .bold))
+                .foregroundColor(accent)
+                .frame(width: 22)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundColor(.white)
+                Text(subtitle)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.white.opacity(0.64))
+            }
         }
     }
 
@@ -1256,26 +1613,101 @@ private struct NameCaptureSheet: View {
         )
     }
 
+    private var setupCard: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Repeatable week")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundColor(.white.opacity(0.65))
+
+                HStack(spacing: 8) {
+                    ForEach([4, 5, 6], id: \.self) { days in
+                        setupOption(
+                            label: "\(days)",
+                            caption: "days",
+                            selected: trainingDays == days
+                        ) {
+                            trainingDays = days
+                        }
+                    }
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Units")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundColor(.white.opacity(0.65))
+
+                HStack(spacing: 8) {
+                    setupOption(label: "LB", caption: "pounds", selected: unit == .lb) {
+                        unit = .lb
+                    }
+                    setupOption(label: "KG", caption: "kilos", selected: unit == .kg) {
+                        unit = .kg
+                    }
+                }
+            }
+        }
+        .padding(16)
+        .background(Color.white.opacity(0.06))
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .stroke(Color.white.opacity(0.14), lineWidth: 1)
+        )
+    }
+
+    private func setupOption(
+        label: String,
+        caption: String,
+        selected: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            VStack(spacing: 3) {
+                Text(label)
+                    .font(.system(size: 16, weight: .bold))
+                Text(caption)
+                    .font(.system(size: 10, weight: .semibold))
+                    .opacity(0.72)
+            }
+            .foregroundColor(.white)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 11)
+            .background(selected ? Color.black.opacity(0.48) : Color.white.opacity(0.1))
+            .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+            .overlay(
+                ZStack {
+                    RoundedRectangle(cornerRadius: 13, style: .continuous)
+                        .stroke(Color.white.opacity(selected ? 0.26 : 0.13), lineWidth: 1)
+                    if selected {
+                        AnimatedRainbowStroke(cornerRadius: 13, lineWidth: 1.3)
+                    }
+                }
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
     private var continueButton: some View {
         Button {
             submit()
         } label: {
             HStack(spacing: 8) {
-                Text("Continue")
+                Text("Start 8 Weeks")
                     .font(.system(size: 18, weight: .bold))
                 Image(systemName: "arrow.right")
                     .font(.system(size: 15, weight: .bold))
             }
-            .foregroundColor(.black.opacity(0.88))
+            .foregroundColor(.white)
             .frame(maxWidth: .infinity)
             .padding(.vertical, 15)
-            .background(accent)
+            .background(Color.white.opacity(0.1))
             .clipShape(RoundedRectangle(cornerRadius: 15, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 15, style: .continuous)
-                    .stroke(accent.opacity(0.85), lineWidth: 1)
+                AnimatedRainbowStroke(cornerRadius: 15, lineWidth: 1.4)
             )
-            .shadow(color: accent.opacity(0.45), radius: 14, y: 6)
+            .shadow(color: .black.opacity(0.22), radius: 12, y: 6)
         }
         .buttonStyle(.plain)
         .disabled(cleanName.isEmpty)
@@ -1308,7 +1740,7 @@ private struct NameCaptureSheet: View {
     private func submit() {
         let clean = cleanName
         guard !clean.isEmpty else { return }
-        onContinue(clean)
+        onContinue(clean, trainingDays, unit)
         if !clean.isEmpty {
             dismiss()
         }

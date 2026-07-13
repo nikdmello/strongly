@@ -206,4 +206,47 @@ class MuscleTracker {
             return candidate.contains(normalized) || normalized.contains(candidate)
         }
     }
+
+    static func setCredits(
+        for exercises: [ExerciseLog],
+        completedOnly: Bool
+    ) -> [MuscleGroup: Double] {
+        var credits: [MuscleGroup: Double] = [:]
+
+        for exercise in exercises {
+            guard let metadata = matchedExercise(for: exercise.name) else { continue }
+            let setCount = Double(exercise.sets.filter { !completedOnly || $0.completed }.count)
+            guard setCount > 0 else { continue }
+
+            for muscle in metadata.primaryMuscles {
+                credits[muscle, default: 0] += setCount
+            }
+            for muscle in metadata.secondaryMuscles {
+                credits[muscle, default: 0] += setCount * TrainingTargets.secondaryMuscleCredit
+            }
+        }
+
+        return credits
+    }
+
+    static func deficits(
+        required: [MuscleGroup: Double],
+        achieved: [MuscleGroup: Double]
+    ) -> [MuscleGroup: Double] {
+        var result: [MuscleGroup: Double] = [:]
+        for (muscle, needed) in required {
+            let remaining = max(0, needed - (achieved[muscle] ?? 0))
+            if remaining > 0.0001 {
+                result[muscle] = remaining
+            }
+        }
+        return result
+    }
+
+    static func meetsQuota(
+        required: [MuscleGroup: Double],
+        plannedCredits: [MuscleGroup: Double]
+    ) -> Bool {
+        deficits(required: required, achieved: plannedCredits).isEmpty
+    }
 }

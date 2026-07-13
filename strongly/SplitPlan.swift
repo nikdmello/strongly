@@ -1,6 +1,10 @@
 import Foundation
 import Combine
 
+extension Notification.Name {
+    static let autopilotTelemetry = Notification.Name("autopilotTelemetry")
+}
+
 enum SplitType: String, CaseIterable, Codable {
     case pushPullLegs = "Push/Pull/Legs"
     case upperLower = "Upper/Lower"
@@ -142,6 +146,15 @@ enum DayTypeMuscles {
 }
 
 struct VolumeEngine {
+    static func dailyRequired(
+        remainingSets: Double,
+        eligibleSessionsIncludingToday: Int
+    ) -> Double {
+        guard remainingSets > 0 else { return 0 }
+        guard eligibleSessionsIncludingToday > 0 else { return ceil(remainingSets) }
+        return ceil(remainingSets / Double(eligibleSessionsIncludingToday))
+    }
+
     static func perSessionTargets(plan: SplitPlan) -> [MuscleGroup: Double] {
         var totals: [MuscleGroup: Double] = [:]
         var counts: [MuscleGroup: Int] = [:]
@@ -261,6 +274,12 @@ final class SplitPlanStore: ObservableObject {
     @Published private(set) var lastRestShift: RestShiftRecord? {
         didSet { saveRestShift() }
     }
+    @Published private(set) var deferredLeftovers: [MuscleGroup: Double] {
+        didSet { saveDeferredLeftovers() }
+    }
+    @Published private(set) var recentDeferDates: [Date] {
+        didSet { saveRecentDeferDates() }
+    }
     @Published private(set) var weeklyCompletedSets: [MuscleGroup: Double]
     @Published private(set) var weeklyVolumeResetDate: Date? {
         didSet { saveWeeklyVolumeResetDate() }
@@ -272,7 +291,12 @@ final class SplitPlanStore: ObservableObject {
     private let cursorKey = "split_plan_cursor_v1"
     private let overridesKey = "split_plan_overrides_v1"
     private let restShiftKey = "split_plan_rest_shift_v1"
+    private let deferredLeftoversKey = "split_plan_deferred_leftovers_v1"
+    private let recentDeferDatesKey = "split_plan_recent_defer_dates_v1"
     private let weeklyVolumeResetKey = "split_plan_weekly_volume_reset_v1"
+    private let preferredSessionDurationCapMinutes = 60
+    private let hardSessionDurationCapMinutes = 90
+    private let defaults: UserDefaults
     private static let dateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.calendar = Calendar(identifier: .gregorian)
@@ -282,10 +306,14 @@ final class SplitPlanStore: ObservableObject {
         return formatter
     }()
 
-    init(repository: WorkoutRepository = FileSystemWorkoutRepository()) {
+    init(
+        repository: WorkoutRepository = FileSystemWorkoutRepository(),
+        userDefaults: UserDefaults = .standard
+    ) {
         self.repository = repository
+        self.defaults = userDefaults
         let initialPlan: SplitPlan
-        if let data = UserDefaults.standard.data(forKey: storageKey),
+        if let data = defaults.data(forKey: storageKey),
            let decoded = try? JSONDecoder().decode(SplitPlan.self, from: data) {
             initialPlan = decoded
         } else {
@@ -293,19 +321,31 @@ final class SplitPlanStore: ObservableObject {
         }
         self.plan = initialPlan
         self.currentDayIndex = Self.todayDayIndex(in: initialPlan)
-        if let data = UserDefaults.standard.data(forKey: overridesKey),
+        if let data = defaults.data(forKey: overridesKey),
            let decoded = try? JSONDecoder().decode([String: DayOverride].self, from: data) {
             self.dayOverrides = decoded
         } else {
             self.dayOverrides = [:]
         }
-        if let data = UserDefaults.standard.data(forKey: restShiftKey),
+        if let data = defaults.data(forKey: restShiftKey),
            let decoded = try? JSONDecoder().decode(RestShiftRecord.self, from: data) {
             self.lastRestShift = decoded
         } else {
             self.lastRestShift = nil
         }
-        self.weeklyVolumeResetDate = UserDefaults.standard.object(forKey: weeklyVolumeResetKey) as? Date
+        if let data = defaults.data(forKey: deferredLeftoversKey),
+           let decoded = try? JSONDecoder().decode([MuscleGroup: Double].self, from: data) {
+            self.deferredLeftovers = decoded
+        } else {
+            self.deferredLeftovers = [:]
+        }
+        if let data = defaults.data(forKey: recentDeferDatesKey),
+           let decoded = try? JSONDecoder().decode([Date].self, from: data) {
+            self.recentDeferDates = decoded
+        } else {
+            self.recentDeferDates = []
+        }
+        self.weeklyVolumeResetDate = defaults.object(forKey: weeklyVolumeResetKey) as? Date
         self.weeklyCompletedSets = [:]
 
         historyChangeCancellable = NotificationCenter.default.publisher(for: .workoutHistoryDidChange)
@@ -364,59 +404,141 @@ final class SplitPlanStore: ObservableObject {
         let day = dayConfig(for: date)
         guard !day.isRest else { return [:] }
 
-        var targets: [MuscleGroup: Double] = [:]
-        let weeklyTargetsByGroup = VolumeEngine.weeklyTargetsByGroup(plan: plan)
-        let completedByGroup = weeklyCompletedByGroup()
-        var musclesByGroup: [MuscleTrainingGroup: [MuscleGroup]] = [:]
-
-        for muscle in day.resolvedMuscles() {
-            if musclesByGroup[muscle.trainingGroup, default: []].contains(muscle) {
-                continue
-            }
-            musclesByGroup[muscle.trainingGroup, default: []].append(muscle)
-        }
-
-        for (group, musclesForGroup) in musclesByGroup {
-            guard !musclesForGroup.isEmpty else { continue }
-
-            let weeklyTarget = weeklyTargetsByGroup[group] ?? TrainingTargets.advancedWeeklySets
-            let completed = completedByGroup[group] ?? 0
-            let remaining = max(0, weeklyTarget - completed)
-            let sessionsInWindow = sessionsInRollingWeek(
-                for: group,
+        var rawTargets: [MuscleGroup: Double] = [:]
+        let todaysMuscles = Set(day.resolvedMuscles())
+        for muscle in todaysMuscles {
+            let weeklyTarget = plan.weeklyTargets[muscle] ?? TrainingTargets.advancedWeeklySets
+            let completed = weeklyCompletedSets[muscle] ?? 0
+            let carry = deferredLeftovers[muscle] ?? 0
+            let baseRemaining = max(0, weeklyTarget - completed)
+            let remaining = max(baseRemaining, carry)
+            let eligible = eligibleSessionsIncludingToday(
+                for: muscle,
                 from: date,
                 windowDays: 7
             )
-
-            guard sessionsInWindow > 0 else {
-                for muscle in musclesForGroup {
-                    targets[muscle] = 0
-                }
-                continue
-            }
-
-            let effectiveSessions = max(sessionsInWindow, 2)
-            let rawGroupTargetToday = remaining / Double(effectiveSessions)
-            let totalGroupTargetToday = rawGroupTargetToday > 0 ? max(1, Int(rawGroupTargetToday.rounded())) : 0
-            let perMuscleTargets = distribute(totalGroupTargetToday, count: musclesForGroup.count)
-
-            for (index, muscle) in musclesForGroup.enumerated() where index < perMuscleTargets.count {
-                targets[muscle] = Double(perMuscleTargets[index])
-            }
+            rawTargets[muscle] = VolumeEngine.dailyRequired(
+                remainingSets: remaining,
+                eligibleSessionsIncludingToday: eligible
+            )
         }
 
-        return targets
+        return scaledTargetsForSession(day: day, targets: rawTargets)
     }
 
-    private func weeklyCompletedByGroup() -> [MuscleTrainingGroup: Double] {
-        var completed: [MuscleTrainingGroup: Double] = [:]
-        for group in MuscleTrainingGroup.allCases {
-            let total = group.muscles.reduce(0.0) { partial, muscle in
-                partial + (weeklyCompletedSets[muscle] ?? 0)
-            }
-            completed[group] = total
+    func requiredTargetsForToday() -> [MuscleGroup: Double] {
+        targetsForDate(Date())
+    }
+
+    func requiredSetBudget(for date: Date = Date()) -> Int {
+        let day = dayConfig(for: date)
+        let targets = targetsForDate(date)
+        return requiredSetBudget(for: day, targets: targets)
+    }
+
+    func requiredSetBudget(
+        for day: SplitDayConfig,
+        targets: [MuscleGroup: Double]
+    ) -> Int {
+        guard !day.isRest else { return 0 }
+        let rawSets = rawRequiredSetBudget(for: day, targets: targets)
+        let preferredCap = setCapacity(for: day.dayType, maxMinutes: preferredSessionDurationCapMinutes)
+        let hardCap = setCapacity(for: day.dayType, maxMinutes: hardSessionDurationCapMinutes)
+        if rawSets <= preferredCap {
+            return rawSets
         }
-        return completed
+        return min(rawSets, hardCap)
+    }
+
+    func plannedSetBudget(
+        for day: SplitDayConfig,
+        targets: [MuscleGroup: Double],
+        durationMinutes: Int
+    ) -> Int {
+        guard !day.isRest else { return 0 }
+
+        let required = requiredSetBudget(for: day, targets: targets)
+        let recommended = recommendedWorkoutDurationMinutes(for: day, targets: targets)
+        let hardCap = setCapacity(for: day.dayType, maxMinutes: hardSessionDurationCapMinutes)
+        guard recommended > 0 else {
+            return min(required, hardCap)
+        }
+
+        let ratio = Double(durationMinutes) / Double(recommended)
+        let scaled = Int(round(Double(required) * ratio))
+        let boundedScaled = min(max(required, scaled), hardCap)
+        return max(required, boundedScaled)
+    }
+
+    private func rawRequiredSetBudget(
+        for day: SplitDayConfig,
+        targets: [MuscleGroup: Double]
+    ) -> Int {
+        guard !day.isRest else { return 0 }
+        let totalCredits = targets.values.reduce(0, +)
+        let creditPerSet = max(estimatedCreditPerSet(for: day.dayType), 0.75)
+        let quotaSets = Int(ceil(totalCredits / creditPerSet))
+        return max(day.resolvedMuscles().count, quotaSets)
+    }
+
+    func recommendedWorkoutDurationMinutes(for date: Date = Date()) -> Int {
+        let day = dayConfig(for: date)
+        let targets = targetsForDate(date)
+        return recommendedWorkoutDurationMinutes(for: day, targets: targets)
+    }
+
+    func recommendedWorkoutDurationMinutes(
+        for day: SplitDayConfig,
+        targets: [MuscleGroup: Double]
+    ) -> Int {
+        if day.isRest {
+            return 0
+        }
+        let requiredSets = requiredSetBudget(for: day, targets: targets)
+        let warmup = warmupMinutes(for: day.dayType)
+        let minutesPerSet = estimatedMinutesPerSet(for: day.dayType)
+        let raw = warmup + (Double(requiredSets) * minutesPerSet)
+        let roundedUpToFive = Int(ceil(raw / 5.0) * 5.0)
+        return max(30, min(hardSessionDurationCapMinutes, roundedUpToFive))
+    }
+
+    func workoutMeetsQuota(
+        exercises: [ExerciseLog],
+        date: Date = Date()
+    ) -> Bool {
+        let required = targetsForDate(date)
+        let planned = MuscleTracker.setCredits(for: exercises, completedOnly: false)
+        return MuscleTracker.meetsQuota(required: required, plannedCredits: planned)
+    }
+
+    func completionDeficits(for session: WorkoutSession, date: Date = Date()) -> [MuscleGroup: Double] {
+        let required = targetsForDate(date)
+        guard !required.isEmpty else { return [:] }
+        let achieved = MuscleTracker.setCredits(for: session.exercises, completedOnly: true)
+        return MuscleTracker.deficits(required: required, achieved: achieved)
+    }
+
+    func deferLeftovers(_ deficits: [MuscleGroup: Double]) {
+        guard !deficits.isEmpty else { return }
+        for (muscle, value) in deficits {
+            deferredLeftovers[muscle, default: 0] += value
+        }
+        trackDeferTelemetry(deficits: deficits)
+    }
+
+    private func consumeDeferredLeftovers(with session: WorkoutSession) {
+        guard !deferredLeftovers.isEmpty else { return }
+        let achieved = MuscleTracker.setCredits(for: session.exercises, completedOnly: true)
+        var updated = deferredLeftovers
+        for (muscle, value) in updated {
+            let remaining = max(0, value - (achieved[muscle] ?? 0))
+            if remaining <= 0.0001 {
+                updated.removeValue(forKey: muscle)
+            } else {
+                updated[muscle] = remaining
+            }
+        }
+        deferredLeftovers = updated
     }
 
     private func distribute(_ total: Int, count: Int) -> [Int] {
@@ -436,6 +558,8 @@ final class SplitPlanStore: ObservableObject {
 
     func clearWeeklyVolumeForTesting() {
         weeklyVolumeResetDate = Date()
+        deferredLeftovers = [:]
+        recentDeferDates = []
         Task { await refreshWeeklyCompletedSets() }
     }
 
@@ -515,37 +639,83 @@ final class SplitPlanStore: ObservableObject {
         currentDayIndex = Self.todayDayIndex(in: plan)
     }
 
+    func advanceAfterWorkout(session: WorkoutSession) {
+        consumeDeferredLeftovers(with: session)
+        currentDayIndex = Self.todayDayIndex(in: plan)
+    }
+
+    func recordGeneratedQuotaResult(
+        required: [MuscleGroup: Double],
+        planned: [MuscleGroup: Double],
+        context: String
+    ) {
+        let deficits = MuscleTracker.deficits(required: required, achieved: planned)
+        guard !deficits.isEmpty else { return }
+        let summary = deficits
+            .sorted { $0.value > $1.value }
+            .prefix(4)
+            .map { "\($0.key.rawValue):\(String(format: "%.1f", $0.value))" }
+            .joined(separator: ",")
+        postAutopilotTelemetry(
+            name: "autopilot_quota_miss",
+            payload: [
+                "context": context,
+                "deficits": summary
+            ]
+        )
+    }
+
     private func save() {
         if let data = try? JSONEncoder().encode(plan) {
-            UserDefaults.standard.set(data, forKey: storageKey)
+            defaults.set(data, forKey: storageKey)
         }
     }
 
     private func saveCursor() {
-        UserDefaults.standard.set(currentDayIndex, forKey: cursorKey)
+        defaults.set(currentDayIndex, forKey: cursorKey)
     }
 
     private func saveOverrides() {
         if let data = try? JSONEncoder().encode(dayOverrides) {
-            UserDefaults.standard.set(data, forKey: overridesKey)
+            defaults.set(data, forKey: overridesKey)
         }
     }
 
     private func saveRestShift() {
         if let lastRestShift {
             if let data = try? JSONEncoder().encode(lastRestShift) {
-                UserDefaults.standard.set(data, forKey: restShiftKey)
+                defaults.set(data, forKey: restShiftKey)
             }
         } else {
-            UserDefaults.standard.removeObject(forKey: restShiftKey)
+            defaults.removeObject(forKey: restShiftKey)
+        }
+    }
+
+    private func saveDeferredLeftovers() {
+        if deferredLeftovers.isEmpty {
+            defaults.removeObject(forKey: deferredLeftoversKey)
+            return
+        }
+        if let data = try? JSONEncoder().encode(deferredLeftovers) {
+            defaults.set(data, forKey: deferredLeftoversKey)
+        }
+    }
+
+    private func saveRecentDeferDates() {
+        if recentDeferDates.isEmpty {
+            defaults.removeObject(forKey: recentDeferDatesKey)
+            return
+        }
+        if let data = try? JSONEncoder().encode(recentDeferDates) {
+            defaults.set(data, forKey: recentDeferDatesKey)
         }
     }
 
     private func saveWeeklyVolumeResetDate() {
         if let weeklyVolumeResetDate {
-            UserDefaults.standard.set(weeklyVolumeResetDate, forKey: weeklyVolumeResetKey)
+            defaults.set(weeklyVolumeResetDate, forKey: weeklyVolumeResetKey)
         } else {
-            UserDefaults.standard.removeObject(forKey: weeklyVolumeResetKey)
+            defaults.removeObject(forKey: weeklyVolumeResetKey)
         }
     }
 
@@ -643,6 +813,27 @@ final class SplitPlanStore: ObservableObject {
         return count
     }
 
+    private func eligibleSessionsIncludingToday(
+        for muscle: MuscleGroup,
+        from startDate: Date,
+        windowDays: Int
+    ) -> Int {
+        let calendar = Calendar.current
+        let start = calendar.startOfDay(for: startDate)
+        guard windowDays > 0 else { return 0 }
+
+        var count = 0
+        for offset in 0..<windowDays {
+            guard let current = calendar.date(byAdding: .day, value: offset, to: start) else { continue }
+            let day = dayConfig(for: current)
+            if day.isRest { continue }
+            if Set(day.resolvedMuscles()).contains(muscle) {
+                count += 1
+            }
+        }
+        return count
+    }
+
     private static func weekRange(for date: Date) -> (start: Date, end: Date) {
         let calendar = Calendar(identifier: .gregorian)
         let startOfDay = calendar.startOfDay(for: date)
@@ -678,5 +869,118 @@ final class SplitPlanStore: ObservableObject {
         }
 
         return completed
+    }
+
+    private func warmupMinutes(for dayType: DayType) -> Double {
+        switch dayType {
+        case .legs, .lower:
+            return 8
+        case .rest:
+            return 0
+        default:
+            return 6
+        }
+    }
+
+    private func estimatedMinutesPerSet(for dayType: DayType) -> Double {
+        switch dayType {
+        case .legs, .lower:
+            return 2.9
+        case .full:
+            return 2.8
+        case .push, .pull, .upper:
+            return 2.7
+        case .rest:
+            return 0
+        }
+    }
+
+    private func estimatedCreditPerSet(for dayType: DayType) -> Double {
+        switch dayType {
+        case .legs, .lower:
+            return 1.1
+        case .full:
+            return 1.4
+        case .push, .pull, .upper:
+            return 1.3
+        case .rest:
+            return 1.0
+        }
+    }
+
+    private func setCapacity(for dayType: DayType, maxMinutes: Int) -> Int {
+        guard maxMinutes > 0 else { return 0 }
+        let warmup = warmupMinutes(for: dayType)
+        let minutesPerSet = estimatedMinutesPerSet(for: dayType)
+        guard minutesPerSet > 0 else { return 0 }
+        let workingMinutes = max(0, Double(maxMinutes) - warmup)
+        let capacity = Int(floor(workingMinutes / minutesPerSet))
+        return max(1, capacity)
+    }
+
+    private func scaledTargetsForSession(
+        day: SplitDayConfig,
+        targets: [MuscleGroup: Double]
+    ) -> [MuscleGroup: Double] {
+        guard !day.isRest else { return [:] }
+        guard !targets.isEmpty else { return [:] }
+
+        let rawSetBudget = rawRequiredSetBudget(for: day, targets: targets)
+        let preferredCap = setCapacity(for: day.dayType, maxMinutes: preferredSessionDurationCapMinutes)
+        let hardCap = setCapacity(for: day.dayType, maxMinutes: hardSessionDurationCapMinutes)
+        let boundedSetBudget: Int
+        if rawSetBudget <= preferredCap {
+            boundedSetBudget = rawSetBudget
+        } else {
+            boundedSetBudget = min(rawSetBudget, hardCap)
+        }
+
+        let creditPerSet = max(estimatedCreditPerSet(for: day.dayType), 0.75)
+        let maxCredits = Double(boundedSetBudget) * creditPerSet
+        let currentCredits = targets.values.reduce(0, +)
+        guard currentCredits > 0, currentCredits > maxCredits else {
+            return targets
+        }
+
+        let scale = maxCredits / currentCredits
+        var scaled: [MuscleGroup: Double] = [:]
+        for (muscle, value) in targets {
+            scaled[muscle] = max(0, value * scale)
+        }
+        return scaled
+    }
+
+    private func trackDeferTelemetry(deficits: [MuscleGroup: Double]) {
+        let now = Date()
+        let cutoff = Calendar.current.date(byAdding: .day, value: -7, to: now) ?? now
+        recentDeferDates = (recentDeferDates + [now]).filter { $0 >= cutoff }
+
+        let deficitTotal = deficits.values.reduce(0, +)
+        postAutopilotTelemetry(
+            name: "autopilot_defer_leftovers",
+            payload: [
+                "count_7d": "\(recentDeferDates.count)",
+                "deficit_total": String(format: "%.1f", deficitTotal)
+            ]
+        )
+
+        if recentDeferDates.count >= 3 {
+            postAutopilotTelemetry(
+                name: "autopilot_repeated_defer",
+                payload: [
+                    "count_7d": "\(recentDeferDates.count)"
+                ]
+            )
+        }
+    }
+
+    private func postAutopilotTelemetry(name: String, payload: [String: String]) {
+        var info: [String: String] = payload
+        info["name"] = name
+        NotificationCenter.default.post(
+            name: .autopilotTelemetry,
+            object: nil,
+            userInfo: info
+        )
     }
 }
