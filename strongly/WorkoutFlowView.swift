@@ -16,12 +16,6 @@ enum WorkoutConstants {
     static let lowVolumeThreshold = 10
 }
 
-struct ExerciseTargetContribution: Hashable {
-    let muscle: MuscleGroup
-    let completedCredit: Double
-    let plannedCredit: Double
-}
-
 struct ExerciseTrainingCue: Hashable {
     let lastWeightLb: Double?
     let lastReps: Int?
@@ -141,14 +135,14 @@ struct WorkoutFlowView: View {
                 }
             }
         }
-        .alert("Discard Workout?", isPresented: $showCancelAlert) {
-            Button("Keep Editing", role: .cancel) {}
+        .alert("End Workout?", isPresented: $showCancelAlert) {
+            Button("Keep Training", role: .cancel) {}
             Button("Discard", role: .destructive) {
                 sessionViewModel.cancelWorkout()
                 dismiss()
             }
         } message: {
-            Text("Your progress will be lost.")
+            Text("This workout has unsaved work.")
         }
         .alert("Error", isPresented: .constant(sessionViewModel.error != nil)) {
             Button("OK") {
@@ -161,9 +155,9 @@ struct WorkoutFlowView: View {
                 Text("Something went wrong")
             }
         }
-        .alert("Leftover Sets", isPresented: $showDeferLeftoversAlert) {
+        .alert("Finish Today?", isPresented: $showDeferLeftoversAlert) {
             Button("Keep Training", role: .cancel) {}
-            Button("Defer & Finish") {
+            Button("Finish") {
                 let deficits = pendingDeficits
                 pendingDeficits = [:]
                 planStore.deferLeftovers(deficits)
@@ -296,24 +290,24 @@ struct WorkoutFlowView: View {
     private func contractStrip(session: WorkoutSession) -> some View {
         let completed = completedSets(session)
         let planned = plannedSetGoal(for: session)
-        let required = requiredSetGoal
+        let left = max(planned - completed, 0)
         let warning = contractWarning(session: session)
 
         return VStack(spacing: 6) {
             HStack(spacing: 6) {
                 contractPill(
-                    title: "Target",
-                    value: "\(required)",
-                    tint: warning ? .orange : .white.opacity(0.82)
-                )
-                contractPill(
-                    title: "Sets",
+                    title: "Today",
                     value: "\(planned)",
                     tint: .white.opacity(0.82)
                 )
                 contractPill(
-                    title: "Completed",
+                    title: "Done",
                     value: "\(completed)",
+                    tint: completed >= planned ? .spaceGlow : .white.opacity(0.82)
+                )
+                contractPill(
+                    title: "Left",
+                    value: "\(left)",
                     tint: warning ? .orange : .spaceGlow
                 )
             }
@@ -322,7 +316,7 @@ struct WorkoutFlowView: View {
                 Button {
                     fixPlanForContract(session: session)
                 } label: {
-                    Text("Add Missing Sets")
+                    Text("Fill Today")
                         .font(.system(size: 11, weight: .bold))
                         .foregroundColor(.white)
                         .padding(.horizontal, 12)
@@ -448,18 +442,17 @@ struct WorkoutFlowView: View {
             : todayTargets
         let orderedFocusMuscles = effectiveTargets.keys.sorted { $0.displayName < $1.displayName }
         let completedWorkSets = completedSets(session)
-        let remainingSets = setsLeftToPace(session)
         let quotaGoal = plannedSetGoal(for: session)
 
         return List {
             if !orderedFocusMuscles.isEmpty {
                 VStack(alignment: .leading, spacing: 12) {
                     HStack(alignment: .center) {
-                        Text("Today's Work")
+                        Text("Today")
                             .font(.system(size: 14, weight: .bold))
                             .foregroundColor(.white.opacity(0.85))
                         Spacer()
-                        Text("\(remainingSets) left")
+                        Text("\(completedWorkSets)/\(quotaGoal)")
                             .font(.system(size: 12, weight: .semibold))
                             .foregroundColor(.white.opacity(0.65))
                     }
@@ -473,7 +466,10 @@ struct WorkoutFlowView: View {
                             .frame(height: 8)
                             .overlay(alignment: .leading) {
                                 Capsule()
-                                    .fill(Color.spaceGlow)
+                                    .overlay {
+                                        AnimatedRainbowRail(height: 8)
+                                    }
+                                    .clipShape(Capsule())
                                     .frame(width: max(8, geo.size.width * completion), height: 8)
                             }
                     }
@@ -527,10 +523,6 @@ struct WorkoutFlowView: View {
                 ForEach(session.exercises) { exercise in
                     MinimalExerciseCard(
                         exercise: exercise,
-                        targetContributions: targetContributions(
-                            for: exercise,
-                            targets: effectiveTargets
-                        ),
                         trainingCue: trainingCue(for: exercise.name),
                         showDeleteButton: false,
                         onAddSet: { weight, reps in
@@ -619,65 +611,24 @@ struct WorkoutFlowView: View {
         return (completed, planned)
     }
 
-    private func targetContributions(
-        for exercise: ExerciseLog,
-        targets: [MuscleGroup: Double]
-    ) -> [ExerciseTargetContribution] {
-        guard !targets.isEmpty else { return [] }
-        guard let metadata = ExerciseDatabase.shared.getExercise(named: exercise.name) else { return [] }
-
-        var completed: [MuscleGroup: Double] = [:]
-        var planned: [MuscleGroup: Double] = [:]
-        let completedSetCount = Double(exercise.sets.filter { $0.completed }.count)
-        let plannedSetCount = Double(exercise.sets.count)
-        let targetMuscles = Set(targets.keys)
-
-        for muscle in metadata.primaryMuscles where targetMuscles.contains(muscle) {
-            completed[muscle, default: 0] += completedSetCount
-            planned[muscle, default: 0] += plannedSetCount
-        }
-        for muscle in metadata.secondaryMuscles where targetMuscles.contains(muscle) {
-            completed[muscle, default: 0] += completedSetCount * TrainingTargets.secondaryMuscleCredit
-            planned[muscle, default: 0] += plannedSetCount * TrainingTargets.secondaryMuscleCredit
-        }
-
-        return planned.keys
-            .sorted { $0.displayName < $1.displayName }
-            .map { muscle in
-                ExerciseTargetContribution(
-                    muscle: muscle,
-                    completedCredit: completed[muscle] ?? 0,
-                    plannedCredit: planned[muscle] ?? 0
-                )
-            }
-    }
-
     private func trainingCue(for exerciseName: String) -> ExerciseTrainingCue? {
         guard let exercise = ExerciseDatabase.shared.getExercise(named: exerciseName) else { return nil }
 
         let repRange = ProgressionEngine.repRange(for: exercise)
-        let suggestedWeight = ProgressionEngine.suggestedWeightLb(for: exerciseName, history: workoutHistory)
+        let suggestedTarget = ProgressionEngine.suggestedSetTarget(
+            for: exerciseName,
+            exercise: exercise,
+            history: workoutHistory
+        )
         let lastSet = lastCompletedSet(for: exerciseName)
-
-        let targetReps: Int
-        let progressedWeight: Bool
-        if let lastSet {
-            progressedWeight = suggestedWeight > lastSet.weight
-            targetReps = progressedWeight
-                ? repRange.min
-                : min(max(lastSet.reps + 1, repRange.min), repRange.max)
-        } else {
-            progressedWeight = false
-            targetReps = ProgressionEngine.suggestedReps(for: exercise)
-        }
 
         return ExerciseTrainingCue(
             lastWeightLb: lastSet?.weight,
             lastReps: lastSet?.reps,
-            targetWeightLb: suggestedWeight,
-            targetReps: targetReps,
+            targetWeightLb: suggestedTarget.weightLb,
+            targetReps: suggestedTarget.reps,
             repRange: repRange,
-            isProgression: progressedWeight || (lastSet.map { targetReps > $0.reps } ?? false)
+            isProgression: suggestedTarget.progressed
         )
     }
 
@@ -794,12 +745,6 @@ struct WorkoutFlowView: View {
 
     private func totalSets(_ session: WorkoutSession) -> Int {
         session.exercises.reduce(0) { $0 + $1.sets.count }
-    }
-
-    private func progress(_ session: WorkoutSession) -> CGFloat {
-        let goal = plannedSetGoal(for: session)
-        guard goal > 0 else { return 0 }
-        return CGFloat(min(Double(completedSets(session)) / Double(goal), 1))
     }
 
     private var requiredSetGoal: Int {
@@ -931,13 +876,13 @@ struct WorkoutFlowView: View {
     }
 
     private var deferLeftoversMessage: String {
-        guard !pendingDeficits.isEmpty else { return "Finish now and carry the remaining work into your next eligible session?" }
+        guard !pendingDeficits.isEmpty else { return "Finish now and move the remaining work to your next matching session?" }
         let items = pendingDeficits
             .sorted { $0.key.displayName < $1.key.displayName }
             .prefix(3)
             .map { "\($0.key.displayName): \(formatSets($0.value))" }
             .joined(separator: "\n")
-        return "Finish now and carry this work forward?\n\(items)"
+        return "Strongly will move this to the next matching session.\n\(items)"
     }
 
     private var canComplete: Bool {
@@ -1209,7 +1154,7 @@ struct TodayFocusProgressRow: View {
                             }
                         }
 
-                Text("scheduled \(formatSets(scheduled))")
+                Text("planned \(formatSets(scheduled))")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundColor(scheduled >= target ? .spaceGlow : .white.opacity(0.6))
             }
@@ -1244,7 +1189,6 @@ struct TodayFocusProgressRow: View {
 
 struct MinimalExerciseCard: View {
     let exercise: ExerciseLog
-    let targetContributions: [ExerciseTargetContribution]
     let trainingCue: ExerciseTrainingCue?
     var showDeleteButton: Bool = true
     let onAddSet: (Double, Int) -> Void
@@ -1326,26 +1270,6 @@ struct MinimalExerciseCard: View {
             if let trainingCue {
                 trainingCueRow(trainingCue)
                     .padding(.horizontal, Spacing.m)
-            }
-
-            if !targetContributions.isEmpty {
-                VStack(spacing: 6) {
-                    ForEach(visibleContributions, id: \.muscle) { contribution in
-                        ExerciseContributionRow(
-                            muscle: contribution.muscle,
-                            completed: contribution.completedCredit,
-                            planned: contribution.plannedCredit,
-                            valueText: "\(formatSets(contribution.completedCredit))/\(formatSets(contribution.plannedCredit))"
-                        )
-                    }
-                    if targetContributions.count > 3 {
-                        Text("+\(targetContributions.count - 3) more")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundColor(.white.opacity(0.65))
-                            .frame(maxWidth: .infinity, alignment: .trailing)
-                    }
-                }
-                .padding(.horizontal, Spacing.m)
             }
 
             if !exercise.sets.isEmpty {
@@ -1437,19 +1361,14 @@ struct MinimalExerciseCard: View {
     private func trainingCueRow(_ cue: ExerciseTrainingCue) -> some View {
         HStack(spacing: 8) {
             cueBlock(
-                title: "Last time",
+                title: "Last",
                 value: lastTimeText(for: cue),
                 tint: .white.opacity(0.78)
             )
             cueBlock(
-                title: "Try today",
+                title: "Today",
                 value: targetText(for: cue),
                 tint: .spaceGlow
-            )
-            cueBlock(
-                title: "Range",
-                value: "\(cue.repRange.min)-\(cue.repRange.max)",
-                tint: .white.opacity(0.78)
             )
         }
     }
@@ -1500,10 +1419,6 @@ struct MinimalExerciseCard: View {
 
     private var exerciseMetadata: Exercise? {
         ExerciseDatabase.shared.getExercise(named: exercise.name)
-    }
-
-    private var visibleContributions: [ExerciseTargetContribution] {
-        Array(targetContributions.prefix(3))
     }
 
     private var completedSetCount: Int {

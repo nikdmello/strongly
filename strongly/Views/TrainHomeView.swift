@@ -13,7 +13,6 @@ struct TrainHomeView: View {
     @State private var showWorkout = false
     @State private var draftName = ""
     @State private var showNameCapture = false
-    @State private var autoDurationNote: String?
     @State private var generationErrorMessage: String?
     @EnvironmentObject private var planStore: SplitPlanStore
 
@@ -89,7 +88,6 @@ struct TrainHomeView: View {
             VStack(spacing: PremiumLayout.sectionSpacing) {
                 topHero
                 planCard
-                gymProfileCard
             }
             .padding(.horizontal, Layout.screenHorizontal)
             .padding(.top, 14)
@@ -112,7 +110,7 @@ struct TrainHomeView: View {
                 HStack(spacing: 8) {
                     Image(systemName: "play.fill")
                         .font(.system(size: 13, weight: .bold))
-                    Text("Do Today's Work")
+                    Text("Start Today")
                         .font(.system(size: 18, weight: .semibold))
                 }
                 .font(.system(size: 18, weight: .semibold))
@@ -152,13 +150,13 @@ struct TrainHomeView: View {
                         .font(.system(size: 15, weight: .bold))
                         .foregroundColor(.white.opacity(0.62))
 
-                    Text(day.isRest ? "Recover today." : "Do \(day.dayType.rawValue).")
+                    Text(day.isRest ? "Recover today." : "\(day.dayType.rawValue) today.")
                         .font(.system(size: 38, weight: .heavy))
                         .foregroundColor(.white)
                         .lineLimit(2)
                         .minimumScaleFactor(0.82)
 
-                    Text(day.isRest ? "Come back ready for the next session." : "Finish enough hard sets. Beat last time where you can.")
+                    Text(day.isRest ? "Next session is already queued." : "Hit the sets. Beat last time where you can.")
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundColor(.white.opacity(0.7))
                         .fixedSize(horizontal: false, vertical: true)
@@ -179,7 +177,7 @@ struct TrainHomeView: View {
 
             HStack(spacing: 8) {
                 DayTypeBadge(dayType: day.dayType)
-                commandMetric(title: day.isRest ? "Next" : "Sets", value: day.isRest ? nextTrainingShortCopy() : "\(workSets)")
+                commandMetric(title: day.isRest ? "Next" : "Today", value: day.isRest ? nextTrainingShortCopy() : "\(workSets) sets")
                 commandMetric(title: "Time", value: day.isRest ? "Recover" : "\(duration)m")
             }
         }
@@ -259,25 +257,23 @@ struct TrainHomeView: View {
                     day: day,
                     targets: previewTargets,
                     groups: displayGroups,
-                    selectedDuration: durationPlan.selected,
-                    recommendedDuration: durationPlan.recommended
+                    selectedDuration: durationPlan.selected
                 )
             }
         }
-        .frame(maxWidth: .infinity, minHeight: day.isRest ? 260 : 350, alignment: .topLeading)
+        .frame(maxWidth: .infinity, minHeight: day.isRest ? 260 : 260, alignment: .topLeading)
         .premiumSectionCard(cornerRadius: 24)
     }
 
     private func trainCardHeader(day: SplitDayConfig) -> some View {
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
-                Text("Minimum effective work")
+                Text(day.isRest ? "Recovery" : "Focus")
                     .font(.system(size: 12, weight: .bold))
                     .foregroundColor(.white.opacity(0.58))
-                DayTypeBadge(dayType: day.dayType)
-                Text(day.isRest ? "Rest Day" : "Finish this. Repeat next time.")
-                    .font(.system(size: 22, weight: .bold))
-                    .foregroundColor(.white)
+                if day.isRest {
+                    DayTypeBadge(dayType: day.dayType)
+                }
             }
 
             Spacer()
@@ -347,31 +343,18 @@ struct TrainHomeView: View {
         day: SplitDayConfig,
         targets: [MuscleGroup: Double],
         groups: [MuscleTrainingGroup],
-        selectedDuration: Int,
-        recommendedDuration: Int
+        selectedDuration: Int
     ) -> some View {
-        let requiredWorkSets = planStore.requiredSetBudget(for: day, targets: targets)
         let plannedWorkSets = planStore.plannedSetBudget(
             for: day,
             targets: targets,
             durationMinutes: selectedDuration
         )
-        let recommendedPlannedSets = planStore.plannedSetBudget(
-            for: day,
-            targets: targets,
-            durationMinutes: recommendedDuration
-        )
         let weeklyProgress = weeklyProgress(for: targets)
 
         return VStack(alignment: .leading, spacing: 16) {
-            sessionPlanMetricsRow(
-                requiredSets: requiredWorkSets,
-                plannedSets: plannedWorkSets,
-                selectedDuration: selectedDuration
-            )
-
             VStack(alignment: .leading, spacing: 9) {
-                Text("Muscles to cover")
+                Text("\(plannedWorkSets) sets across")
                     .font(.system(size: 13, weight: .bold))
                     .foregroundColor(.white.opacity(0.7))
 
@@ -419,47 +402,48 @@ struct TrainHomeView: View {
                 .frame(height: 8)
             }
 
-            durationCard(
+            sessionReasonCard(
                 selectedDuration: selectedDuration,
-                recommendedDuration: recommendedDuration,
-                requiredWorkSets: requiredWorkSets,
-                plannedWorkSets: plannedWorkSets,
-                recommendedPlannedSets: recommendedPlannedSets
+                plannedWorkSets: plannedWorkSets
             )
         }
         .padding(.top, 2)
     }
 
-    private func sessionPlanMetricsRow(
-        requiredSets: Int,
-        plannedSets: Int,
-        selectedDuration: Int
+    private func sessionReasonCard(
+        selectedDuration: Int,
+        plannedWorkSets: Int
     ) -> some View {
-        HStack(spacing: 8) {
-            sessionMetricChip(title: "Target", value: "\(requiredSets)")
-            sessionMetricChip(title: "Sets", value: "\(plannedSets)")
-            sessionMetricChip(title: "Time", value: "\(selectedDuration)m")
-        }
-    }
-
-    private func sessionMetricChip(title: String, value: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title.uppercased())
-                .font(.system(size: 10, weight: .bold))
-                .foregroundColor(.white.opacity(0.56))
-                .tracking(0.8)
-            Text(value)
+        HStack(alignment: .center, spacing: 10) {
+            Image(systemName: "checkmark.seal.fill")
                 .font(.system(size: 17, weight: .bold))
-                .foregroundColor(.white)
-                .monospacedDigit()
+                .foregroundColor(.spaceGlow)
+                .frame(width: 32, height: 32)
+                .background(Color.white.opacity(0.1))
+                .clipShape(Circle())
+
+            Text("Built from your split, your gym, and a \(selectedDuration)m time box.")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(.white.opacity(0.72))
+                .fixedSize(horizontal: false, vertical: true)
+
+            Spacer(minLength: 0)
+
+            VStack(alignment: .trailing, spacing: 2) {
+                Text("\(plannedWorkSets)")
+                    .font(.system(size: 18, weight: .bold))
+                    .foregroundColor(.white)
+                    .monospacedDigit()
+                Text("sets")
+                    .font(.system(size: 10, weight: .bold))
+                    .foregroundColor(.white.opacity(0.5))
+            }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 10)
+        .padding(12)
         .background(Color.white.opacity(0.08))
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .stroke(Color.white.opacity(0.12), lineWidth: 1)
         )
     }
@@ -514,107 +498,6 @@ struct TrainHomeView: View {
                 .opacity(planStore.canSkipRestToday() ? 1 : 0.5)
             }
         }
-    }
-
-    private func durationCard(
-        selectedDuration: Int,
-        recommendedDuration: Int,
-        requiredWorkSets: Int,
-        plannedWorkSets: Int,
-        recommendedPlannedSets: Int
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Text("Time Box")
-                    .font(.system(size: 13, weight: .bold))
-                    .foregroundColor(.white.opacity(0.72))
-                Spacer()
-                if durationUserOverride, recommendedDuration != preferredDuration {
-                    Text("Recommended \(recommendedDuration)m")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundColor(.spaceGlow)
-                        .monospacedDigit()
-                }
-            }
-
-            HStack(spacing: 10) {
-                Button {
-                    durationUserOverride = true
-                    preferredDuration = max(30, preferredDuration - 5)
-                    autoDurationNote = nil
-                } label: {
-                    Image(systemName: "minus")
-                        .font(.system(size: 13, weight: .bold))
-                        .foregroundColor(.white)
-                        .frame(width: 32, height: 32)
-                        .background(Color.white.opacity(0.12))
-                        .clipShape(Circle())
-                }
-
-                Text("\(preferredDuration) min")
-                    .font(.system(size: 20, weight: .bold))
-                    .foregroundColor(.white)
-                    .monospacedDigit()
-                    .frame(minWidth: 104, alignment: .center)
-
-                Button {
-                    durationUserOverride = true
-                    preferredDuration = min(120, preferredDuration + 5)
-                    autoDurationNote = nil
-                } label: {
-                    Image(systemName: "plus")
-                        .font(.system(size: 13, weight: .bold))
-                        .foregroundColor(.white)
-                        .frame(width: 32, height: 32)
-                        .background(Color.white.opacity(0.12))
-                        .clipShape(Circle())
-                }
-
-                Spacer()
-
-                Button {
-                    withAnimation(Motion.quick) {
-                        durationUserOverride = false
-                        autoDurationNote = nil
-                        applyRecommendedDurationIfNeeded()
-                    }
-                } label: {
-                    Text("Auto")
-                        .font(.system(size: 12, weight: .bold))
-                        .foregroundColor(.spaceGlow)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 7)
-                        .background(Color.white.opacity(0.12))
-                        .clipShape(Capsule())
-                        .fixedSize(horizontal: true, vertical: false)
-                        .overlay(
-                            Capsule()
-                                .stroke(Color.spaceGlow.opacity(0.45), lineWidth: 1)
-                        )
-                }
-                .buttonStyle(.plain)
-            }
-
-            if let note = durationRecommendationText(
-                selectedDuration: selectedDuration,
-                recommendedDuration: recommendedDuration,
-                requiredWorkSets: requiredWorkSets,
-                plannedWorkSets: plannedWorkSets,
-                recommendedPlannedSets: recommendedPlannedSets
-            ) {
-                Text(note)
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundColor(.white.opacity(0.68))
-                    .lineLimit(2)
-            }
-        }
-        .padding(12)
-        .background(Color.white.opacity(0.08))
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(Color.white.opacity(0.14), lineWidth: 1)
-        )
     }
 
     private func metricChip(title: String, value: String) -> some View {
@@ -914,12 +797,6 @@ struct TrainHomeView: View {
         )
         generatedTargets = sessionTargets
         generatedSetBudget = contract.valid ? plannedWorkSets : totalPlannedSets(in: candidateExercises)
-        autoDurationNote = buildAutoDurationNote(
-            rawTargets: rawTargets,
-            sessionTargets: sessionTargets,
-            duration: selectedDuration
-        )
-
         for i in 0..<3 {
             DispatchQueue.main.asyncAfter(deadline: .now() + Double(i) * 0.1) {
                 HapticFeedback.success.trigger()
@@ -982,40 +859,6 @@ struct TrainHomeView: View {
             ? preferredDuration
             : recommended
         return (recommended, selected)
-    }
-
-    private func buildAutoDurationNote(
-        rawTargets: [MuscleGroup: Double],
-        sessionTargets: [MuscleGroup: Double],
-        duration: Int
-    ) -> String {
-        let rawTotal = rawTargets.values.reduce(0, +)
-        let sessionTotal = sessionTargets.values.reduce(0, +)
-        if sessionTotal + 0.5 < rawTotal {
-            return "Auto kept today to \(formatSets(sessionTotal)) focused sets in \(duration)m."
-        }
-        return "Today has enough work in \(duration)m."
-    }
-
-    private func durationRecommendationText(
-        selectedDuration: Int,
-        recommendedDuration: Int,
-        requiredWorkSets: Int,
-        plannedWorkSets: Int,
-        recommendedPlannedSets: Int
-    ) -> String? {
-        if durationUserOverride {
-            let delta = plannedWorkSets - recommendedPlannedSets
-            if delta != 0 {
-                let prefix = delta > 0 ? "+" : ""
-                return "Time override \(selectedDuration)m: \(prefix)\(delta) work sets vs auto."
-            }
-            return "Time override keeps today at \(max(requiredWorkSets, plannedWorkSets)) sets."
-        }
-        if selectedDuration != recommendedDuration {
-            return "Auto set \(selectedDuration)m for today’s work."
-        }
-        return autoDurationNote
     }
 
     private func rebalanceToExactSetBudget(

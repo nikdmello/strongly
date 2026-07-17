@@ -146,7 +146,7 @@ class WorkoutGenerator {
             return GeneratedWorkout(
                 exercises: [],
                 estimatedDuration: 0,
-                reasoning: "Selected equipment needs more exercises. Try 'Both' or add more exercises to the database."
+                reasoning: "This equipment profile needs more matching exercises."
             )
         }
 
@@ -160,7 +160,7 @@ class WorkoutGenerator {
             return GeneratedWorkout(
                 exercises: [],
                 estimatedDuration: 0,
-                reasoning: "Unable to generate workout. Try selecting different muscle groups or reducing duration."
+                reasoning: "This session needs a cleaner exercise match."
             )
         }
 
@@ -308,7 +308,7 @@ class WorkoutGenerator {
 
             if exercise.focus == .mobility {
                 score += 28
-                reason = "Mobility priority"
+                reason = "Recovery priority"
             } else {
                 score -= 12
             }
@@ -591,13 +591,16 @@ class WorkoutGenerator {
         var logs: [ExerciseLog] = []
 
         for scored in exercises {
-            let suggestedWeight = ProgressionEngine.suggestedWeightLb(for: scored.exercise.name, history: history)
-            let suggestedReps = ProgressionEngine.suggestedReps(for: scored.exercise)
+            let target = ProgressionEngine.suggestedSetTarget(
+                for: scored.exercise.name,
+                exercise: scored.exercise,
+                history: history
+            )
             let setsCount = strategy == .deload ? 2 : 3
             let sets = (0..<setsCount).map { _ in
                 ExerciseSet(
-                    weight: suggestedWeight,
-                    reps: suggestedReps,
+                    weight: target.weightLb,
+                    reps: target.reps,
                     completed: false
                 )
             }
@@ -618,25 +621,25 @@ class WorkoutGenerator {
 
         switch strategy {
         case .deload:
-            parts.append("🔄 Deload week - reduced volume for recovery")
+            parts.append("Reduced volume")
         case .balancing:
-            parts.append("⚖️ Balancing muscle groups")
+            parts.append("Balanced week")
         case .progressive:
-            parts.append("📈 Progressive overload focus")
+            parts.append("Beat last time")
         }
 
         switch request.focus {
         case .strength:
-            parts.append("🏋️ Hypertrophy session")
+            parts.append("Hypertrophy")
         case .balanced:
-            parts.append("⚖️ Hypertrophy session")
+            parts.append("Hypertrophy")
         case .mobility:
-            parts.append("🏋️ Hypertrophy session")
+            parts.append("Hypertrophy")
         }
 
         let targetMuscles = Set(selected.flatMap { $0.exercise.primaryMuscles })
         let muscleNames = targetMuscles.map { $0.displayName }.sorted().joined(separator: ", ")
-        parts.append("Targeting: \(muscleNames)")
+        parts.append(muscleNames)
 
         let compounds = selected.filter { $0.exercise.primaryMuscles.count > 1 }.count
         let preferred = selected.filter { request.preferredExercises.contains($0.exercise.name) }.count

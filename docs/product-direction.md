@@ -27,7 +27,7 @@ Useful language:
 - Today's work
 - Beat last time
 - Keep the plan
-- Enough for today
+- Today's target
 - Recover next
 - Repeatable progress
 

@@ -94,8 +94,8 @@ struct SplitBuilderView: View {
     private var planControls: some View {
         VStack(alignment: .leading, spacing: Space.m) {
             SectionLead(
-                title: "Training Constraints",
-                subtitle: "Pick the week you can actually repeat."
+                title: "Training Setup",
+                subtitle: "Pick the week you can repeat."
             )
 
             VStack(alignment: .leading, spacing: Space.s) {
@@ -232,8 +232,8 @@ struct SplitBuilderView: View {
     private var targetSection: some View {
         VStack(alignment: .leading, spacing: Space.m) {
             SectionLead(
-                title: "Enough Weekly Work",
-                subtitle: "Default targets work for the plan. Adjust them when your recovery or schedule calls for it."
+                title: "Weekly Work",
+                subtitle: "Keep the default targets unless recovery or schedule changes."
             )
 
             HStack {
@@ -256,7 +256,7 @@ struct SplitBuilderView: View {
                 }
             }
 
-            Text("Default: \(Int(TrainingTargets.advancedWeeklySets)) hard sets per muscle / week")
+            Text("Default: \(Int(TrainingTargets.advancedWeeklySets)) hard sets per muscle each week")
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundColor(.white.opacity(0.58))
 

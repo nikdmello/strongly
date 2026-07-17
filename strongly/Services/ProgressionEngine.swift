@@ -94,6 +94,11 @@ final class ExerciseProgressStore: ObservableObject {
         save()
     }
 
+    func clearForTesting() {
+        progress = [:]
+        UserDefaults.standard.removeObject(forKey: key)
+    }
+
     private func load() {
         guard let data = UserDefaults.standard.data(forKey: key),
               let decoded = try? JSONDecoder().decode([String: ExerciseProgress].self, from: data) else {
@@ -136,6 +141,25 @@ enum ProgressionEngine {
         repRange(for: exercise).min
     }
 
+    static func suggestedSetTarget(
+        for exerciseName: String,
+        exercise: Exercise,
+        history: [WorkoutSession]
+    ) -> (weightLb: Double, reps: Int, progressed: Bool) {
+        let range = repRange(for: exercise)
+        let suggestedWeight = suggestedWeightLb(for: exerciseName, history: history)
+
+        guard let lastSet = lastCompletedSet(for: exerciseName, history: history) else {
+            return (suggestedWeight, range.min, false)
+        }
+
+        let weightMoved = suggestedWeight > lastSet.weight
+        let reps = weightMoved
+            ? range.min
+            : min(max(lastSet.reps + 1, range.min), range.max)
+        return (suggestedWeight, reps, weightMoved || reps > lastSet.reps)
+    }
+
     static func updateProgress(from session: WorkoutSession) {
         for exerciseLog in session.exercises {
             guard let exercise = ExerciseDatabase.shared.getExercise(named: exerciseLog.name) else { continue }
@@ -176,10 +200,14 @@ enum ProgressionEngine {
     }
 
     private static func lastCompletedWeightLb(for exerciseName: String, history: [WorkoutSession]) -> Double? {
+        lastCompletedSet(for: exerciseName, history: history)?.weight
+    }
+
+    private static func lastCompletedSet(for exerciseName: String, history: [WorkoutSession]) -> ExerciseSet? {
         for session in history.sorted(by: { $0.date > $1.date }) {
             if let log = session.exercises.first(where: { $0.name.lowercased() == exerciseName.lowercased() }) {
                 if let set = log.sets.first(where: { $0.completed }) {
-                    return set.weight
+                    return set
                 }
             }
         }

@@ -133,6 +133,68 @@ final class SplitPlanAutopilotTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(shortened, required)
     }
 
+    func testProgressionSuggestsNextRepBeforeAddingWeight() {
+        ExerciseProgressStore.shared.clearForTesting()
+        guard let exercise = ExerciseDatabase.shared.getExercise(named: "Incline Bench Press") else {
+            XCTFail("Missing exercise metadata")
+            return
+        }
+        let history = [
+            WorkoutSession(
+                date: Date(),
+                exercises: [
+                    ExerciseLog(
+                        name: "Incline Bench Press",
+                        sets: [ExerciseSet(weight: 135, reps: 8, completed: true)]
+                    )
+                ]
+            )
+        ]
+
+        let target = ProgressionEngine.suggestedSetTarget(
+            for: "Incline Bench Press",
+            exercise: exercise,
+            history: history
+        )
+
+        XCTAssertEqual(target.weightLb, 135)
+        XCTAssertEqual(target.reps, 9)
+        XCTAssertTrue(target.progressed)
+    }
+
+    func testProgressionAddsWeightAfterTopRangeSets() {
+        ExerciseProgressStore.shared.clearForTesting()
+        let session = WorkoutSession(
+            date: Date(),
+            exercises: [
+                ExerciseLog(
+                    name: "Incline Bench Press",
+                    sets: [
+                        ExerciseSet(weight: 135, reps: 10, completed: true),
+                        ExerciseSet(weight: 135, reps: 10, completed: true),
+                        ExerciseSet(weight: 135, reps: 10, completed: true)
+                    ]
+                )
+            ]
+        )
+
+        ProgressionEngine.updateProgress(from: session)
+
+        guard let exercise = ExerciseDatabase.shared.getExercise(named: "Incline Bench Press") else {
+            XCTFail("Missing exercise metadata")
+            return
+        }
+        let target = ProgressionEngine.suggestedSetTarget(
+            for: "Incline Bench Press",
+            exercise: exercise,
+            history: [session]
+        )
+
+        XCTAssertEqual(target.weightLb, 140)
+        XCTAssertEqual(target.reps, 5)
+        XCTAssertTrue(target.progressed)
+    }
+
     private func assertGeneratedWorkoutUsesHypertrophyExercisesOnly() async {
         let generator = WorkoutGenerator(repository: InMemoryWorkoutRepository(sessions: []))
         let request = WorkoutRequest(

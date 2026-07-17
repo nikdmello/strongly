@@ -38,16 +38,6 @@ enum MuscleGroup: String, CaseIterable, Codable {
         }
     }
 
-    var emoji: String {
-        switch self {
-        case .chestUpper, .chestLower: return "🫀"
-        case .backWidth, .backThickness: return "🦾"
-        case .shoulderFront, .shoulderSide, .shoulderRear: return "🏋️"
-        case .quads, .hamstrings, .glutes, .calves: return "🦵"
-        case .biceps, .triceps: return "💪"
-        case .abs: return "🔥"
-        }
-    }
 }
 
 enum MuscleTrainingGroup: String, CaseIterable, Codable {

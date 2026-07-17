@@ -70,7 +70,7 @@ struct HistoryView: View {
         VStack(alignment: .leading, spacing: 14) {
             SectionLead(
                 title: "Proof of the work",
-                subtitle: "Show up, finish hard sets, and repeat long enough for the trend to matter."
+                subtitle: "Finished sets, steady weeks, repeatable progress."
             )
 
             HStack(spacing: 10) {
@@ -179,7 +179,7 @@ struct WeeklyVolumeSection: View {
         VStack(alignment: .leading, spacing: Space.m) {
             HStack(alignment: .top) {
                 SectionLead(
-                    title: "Enough Weekly Work",
+                    title: "Weekly Work",
                     subtitle: "A simple check that the week is moving."
                 )
 
